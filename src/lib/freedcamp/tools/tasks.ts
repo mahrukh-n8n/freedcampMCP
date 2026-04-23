@@ -1,13 +1,15 @@
 /**
- * Task tools — list_tasks, get_task
+ * Task tools — list_tasks, get_task, create_task, update_task, delete_task, assign_task
  *
- * Freedcamp tasks endpoint: GET /tasks, GET /tasks/{id}
+ * Freedcamp tasks endpoint: GET/POST /tasks, GET/PUT/DELETE /tasks/{id}
  * Default includes f_include_tags=1 to prevent silent data loss (TASK-06).
  * task_url constructed from project_id + task_id (TASK-10).
+ * Status bidirectional mapping: "not started"↔0, "in progress"↔1, "completed"↔2 (TASK-08).
  */
 
 import { z } from "zod";
 import type { McpToolResult } from "../../../modules/mcp/types";
+import { dataResult, errorResult } from "../../../modules/mcp/utils/serialize";
 import type { FreedcampApiClient } from "../api-client";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -167,3 +169,181 @@ export function createGetTaskHandler(client: FreedcampApiClient) {
     return result;
   };
 }
+
+// ── Status bidirectional mapping (TASK-08) ────────────────────────────────
+
+const STATUS_LABEL_TO_CODE: Record<string, number> = {
+  "not started": 0,
+  "in progress": 1,
+  completed: 2,
+};
+
+const STATUS_CODE_TO_LABEL: Record<number, string> = {
+  0: "not started",
+  1: "in progress",
+  2: "completed",
+};
+
+/** Accept both string labels and numeric codes, always output numeric code for API. */
+function toStatusCode(status: string | number): number {
+  if (typeof status === "number") return status;
+  const lower = status.toLowerCase();
+  if (lower in STATUS_LABEL_TO_CODE) return STATUS_LABEL_TO_CODE[lower];
+  const parsed = parseInt(status, 10);
+  if (!isNaN(parsed)) return parsed;
+  throw new Error(`Invalid task status: "${status}". Use 0/1/2 or "not started"/"in progress"/"completed"`);
+}
+
+// ── create_task ──────────────────────────────────────────────────────────────
+
+export const createTaskSchema = z.object({
+  project_id: z.number().int().describe("Project ID (required)"),
+  title: z.string().min(1).describe("Task title (required)"),
+  task_group_id: z.number().int().optional().describe("Task group ID"),
+  description: z.string().optional().describe("Task description"),
+  priority: z.number().int().min(0).max(3).optional().describe("Priority: 0=None, 1=Low, 2=Medium, 3=High"),
+  assigned_to_id: z.union([z.number().int(), z.array(z.number().int())]).optional()
+    .transform((v) => (Array.isArray(v) ? v : v !== undefined ? [v] : undefined))
+    .describe("User ID(s) to assign"),
+  status: z.union([z.number().int(), z.string()]).optional()
+    .describe("Status: 0=not started, 1=in progress, 2=completed, or string label"),
+  start_date: z.string().optional().describe("Start date (YYYY-MM-DD)"),
+  due_date: z.string().optional().describe("Due date (YYYY-MM-DD)"),
+  r_rule: z.string().optional().describe("Recurrence rule (iCal RRULE format)"),
+  h_parent_id: z.number().int().optional().describe("Parent task ID for subtask"),
+  cf_tpl_id: z.number().int().optional().describe("Custom field template ID"),
+  custom_fields: z.record(z.unknown()).optional().describe("Custom field values as key-value pairs"),
+});
+
+export type CreateTaskInput = z.infer<typeof createTaskSchema>;
+
+export function createCreateTaskHandler(client: FreedcampApiClient) {
+  return async (_ctx: unknown, rawInput: unknown): Promise<McpToolResult> => {
+    const input = rawInput as CreateTaskInput;
+
+    const body: Record<string, unknown> = {
+      project_id: input.project_id,
+      title: input.title,
+    };
+
+    if (input.task_group_id !== undefined) body.task_group_id = input.task_group_id;
+    if (input.description !== undefined) body.description = input.description;
+    if (input.priority !== undefined) body.priority = input.priority;
+    if (input.assigned_to_id !== undefined) body.assigned_to_id = input.assigned_to_id;
+    if (input.status !== undefined) body.status = toStatusCode(input.status);
+    if (input.start_date !== undefined) body.start_date = input.start_date;
+    if (input.due_date !== undefined) body.due_date = input.due_date;
+    if (input.r_rule !== undefined) body.r_rule = input.r_rule;
+    if (input.h_parent_id !== undefined) body.h_parent_id = input.h_parent_id;
+    if (input.cf_tpl_id !== undefined) body.cf_tpl_id = input.cf_tpl_id;
+    if (input.custom_fields !== undefined) body.custom_fields = input.custom_fields;
+
+    return client.request("/tasks", {
+      method: "POST",
+      body,
+    });
+  };
+}
+
+// ── update_task ──────────────────────────────────────────────────────────────
+
+export const updateTaskSchema = z.object({
+  project_id: z.number().int().describe("Project ID (required)"),
+  task_id: z.number().int().describe("Task ID to update (required)"),
+  title: z.string().min(1).optional().describe("New task title"),
+  task_group_id: z.number().int().optional().describe("Move to this task group"),
+  description: z.string().optional().describe("New description"),
+  priority: z.number().int().min(0).max(3).optional().describe("Priority: 0=None, 1=Low, 2=Medium, 3=High"),
+  assigned_to_id: z.union([z.number().int(), z.array(z.number().int())]).optional()
+    .transform((v) => (Array.isArray(v) ? v : v !== undefined ? [v] : undefined))
+    .describe("User ID(s) to assign"),
+  status: z.union([z.number().int(), z.string()]).optional()
+    .describe("Status: 0/1/2 or string label"),
+  start_date: z.string().optional().describe("Start date (YYYY-MM-DD)"),
+  due_date: z.string().optional().describe("Due date (YYYY-MM-DD)"),
+  r_rule: z.string().optional().describe("Recurrence rule"),
+  h_parent_id: z.number().int().optional().describe("Parent task ID for subtask"),
+  cf_tpl_id: z.number().int().optional().describe("Custom field template ID"),
+  custom_fields: z.record(z.unknown()).optional().describe("Custom field values"),
+});
+
+export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
+
+export function createUpdateTaskHandler(client: FreedcampApiClient) {
+  return async (_ctx: unknown, rawInput: unknown): Promise<McpToolResult> => {
+    const input = rawInput as UpdateTaskInput;
+
+    const body: Record<string, unknown> = {
+      project_id: input.project_id,
+    };
+
+    if (input.title !== undefined) body.title = input.title;
+    if (input.task_group_id !== undefined) body.task_group_id = input.task_group_id;
+    if (input.description !== undefined) body.description = input.description;
+    if (input.priority !== undefined) body.priority = input.priority;
+    if (input.assigned_to_id !== undefined) body.assigned_to_id = input.assigned_to_id;
+    if (input.status !== undefined) body.status = toStatusCode(input.status);
+    if (input.start_date !== undefined) body.start_date = input.start_date;
+    if (input.due_date !== undefined) body.due_date = input.due_date;
+    if (input.r_rule !== undefined) body.r_rule = input.r_rule;
+    if (input.h_parent_id !== undefined) body.h_parent_id = input.h_parent_id;
+    if (input.cf_tpl_id !== undefined) body.cf_tpl_id = input.cf_tpl_id;
+    if (input.custom_fields !== undefined) body.custom_fields = input.custom_fields;
+
+    return client.request(`/tasks/${input.task_id}`, {
+      method: "PUT",
+      body,
+    });
+  };
+}
+
+// ── delete_task ──────────────────────────────────────────────────────────────
+
+export const deleteTaskSchema = z.object({
+  project_id: z.number().int().describe("Project ID the task belongs to"),
+  task_id: z.number().int().describe("Task ID to delete"),
+});
+
+export type DeleteTaskInput = z.infer<typeof deleteTaskSchema>;
+
+export function createDeleteTaskHandler(client: FreedcampApiClient) {
+  return async (_ctx: unknown, rawInput: unknown): Promise<McpToolResult> => {
+    const input = rawInput as DeleteTaskInput;
+    return client.request(`/tasks/${input.task_id}`, {
+      method: "DELETE",
+      params: { project_id: input.project_id },
+    });
+  };
+}
+
+// ── assign_task ──────────────────────────────────────────────────────────────
+
+export const assignTaskSchema = z.object({
+  project_id: z.number().int().describe("Project ID the task belongs to"),
+  task_id: z.number().int().describe("Task ID to assign"),
+  user_id: z.union([z.number().int(), z.array(z.number().int())]).optional()
+    .transform((v) => (Array.isArray(v) ? v : v !== undefined ? [v] : undefined))
+    .describe("User ID(s) to assign to this task"),
+});
+
+export type AssignTaskInput = z.infer<typeof assignTaskSchema>;
+
+export function createAssignTaskHandler(client: FreedcampApiClient) {
+  return async (_ctx: unknown, rawInput: unknown): Promise<McpToolResult> => {
+    const input = rawInput as AssignTaskInput;
+
+    const body: Record<string, unknown> = {
+      project_id: input.project_id,
+    };
+    if (input.user_id !== undefined) {
+      body.user_id = input.user_id;
+    }
+
+    return client.request(`/tasks/${input.task_id}/assign`, {
+      method: "POST",
+      body,
+    });
+  };
+}
+
+export { STATUS_LABEL_TO_CODE, STATUS_CODE_TO_LABEL, toStatusCode };

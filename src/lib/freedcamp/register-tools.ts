@@ -9,7 +9,14 @@ import { toolRegistry } from "../../modules/mcp/registry/tool-registry";
 import type { FreedcampApiClient } from "./api-client";
 import { listProjectsSchema, createListProjectsHandler, getProjectSchema, createGetProjectHandler } from "./tools/projects";
 import { listUsersSchema, createListUsersHandler, getUserSchema, createGetUserHandler } from "./tools/users";
-import { listTasksSchema, createListTasksHandler, getTaskSchema, createGetTaskHandler } from "./tools/tasks";
+import {
+  listTasksSchema, createListTasksHandler,
+  getTaskSchema, createGetTaskHandler,
+  createTaskSchema, createCreateTaskHandler,
+  updateTaskSchema, createUpdateTaskHandler,
+  deleteTaskSchema, createDeleteTaskHandler,
+  assignTaskSchema, createAssignTaskHandler,
+} from "./tools/tasks";
 import { healthCheckSchema } from "./tools/health";
 
 export function registerAllTools(client: FreedcampApiClient, apiKey: string, apiSecret: string, baseUrl?: string): void {
@@ -64,7 +71,7 @@ export function registerAllTools(client: FreedcampApiClient, apiKey: string, api
     handler: createGetUserHandler(client),
   });
 
-  // Tasks
+  // Tasks — read
   toolRegistry.register({
     name: "task.list",
     description: "List tasks in a project with full filter support: assigned user, status (0/1/2 or labels), date ranges, tags, search. Defaults f_include_tags=1 to prevent data loss. Supports pagination, sort, and field limiting.",
@@ -81,6 +88,43 @@ export function registerAllTools(client: FreedcampApiClient, apiKey: string, api
     requiredPageKey: "tasks",
     accessLevel: "READ",
     handler: createGetTaskHandler(client),
+  });
+
+  // Tasks — write
+  toolRegistry.register({
+    name: "task.create",
+    description: "Create a new task. Accepts string status labels (\"not started\", \"in progress\", \"completed\") or numeric codes (0, 1, 2).",
+    inputSchema: createTaskSchema,
+    requiredPageKey: "tasks",
+    accessLevel: "WRITE",
+    handler: createCreateTaskHandler(client),
+  });
+
+  toolRegistry.register({
+    name: "task.update",
+    description: "Update an existing task. Only provided fields are changed. Accepts string status labels or numeric codes.",
+    inputSchema: updateTaskSchema,
+    requiredPageKey: "tasks",
+    accessLevel: "WRITE",
+    handler: createUpdateTaskHandler(client),
+  });
+
+  toolRegistry.register({
+    name: "task.delete",
+    description: "Delete a task by ID.",
+    inputSchema: deleteTaskSchema,
+    requiredPageKey: "tasks",
+    accessLevel: "WRITE",
+    handler: createDeleteTaskHandler(client),
+  });
+
+  toolRegistry.register({
+    name: "task.assign",
+    description: "Assign one or more users to a task. POST to /tasks/{id}/assign.",
+    inputSchema: assignTaskSchema,
+    requiredPageKey: "tasks",
+    accessLevel: "WRITE",
+    handler: createAssignTaskHandler(client),
   });
 
   toolRegistry.freeze();
