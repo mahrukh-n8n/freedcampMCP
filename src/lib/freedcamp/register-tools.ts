@@ -29,6 +29,11 @@ import {
   assignTaskSchema, createAssignTaskHandler,
 } from "./tools/tasks";
 import { healthCheckSchema } from "./tools/health";
+import {
+  addCommentSchema, createAddCommentHandler,
+  updateCommentSchema, createUpdateCommentHandler,
+  deleteCommentSchema, createDeleteCommentHandler,
+} from "./tools/comments";
 
 export function registerAllTools(client: FreedcampApiClient, apiKey: string, apiSecret: string, baseUrl?: string): void {
   // Health check
@@ -183,6 +188,34 @@ export function registerAllTools(client: FreedcampApiClient, apiKey: string, api
     requiredPageKey: "tasks",
     accessLevel: "WRITE",
     handler: createAssignTaskHandler(client),
+  });
+
+  // Comments
+  toolRegistry.register({
+    name: "comment.add",
+    description: "Add a comment to a task, milestone, discussion, file, or time entry. app_id identifies the app: tasks=2, milestones=3, discussions=5, files=6, time=8, issue_tracker=9.",
+    inputSchema: addCommentSchema,
+    requiredPageKey: "comments",
+    accessLevel: "WRITE",
+    handler: createAddCommentHandler(client),
+  });
+
+  toolRegistry.register({
+    name: "comment.update",
+    description: "Update an existing comment's text.",
+    inputSchema: updateCommentSchema,
+    requiredPageKey: "comments",
+    accessLevel: "WRITE",
+    handler: createUpdateCommentHandler(client),
+  });
+
+  toolRegistry.register({
+    name: "comment.delete",
+    description: "Delete a comment by ID.",
+    inputSchema: deleteCommentSchema,
+    requiredPageKey: "comments",
+    accessLevel: "WRITE",
+    handler: createDeleteCommentHandler(client),
   });
 
   toolRegistry.freeze();
