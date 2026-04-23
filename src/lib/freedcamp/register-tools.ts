@@ -9,6 +9,7 @@ import { toolRegistry } from "../../modules/mcp/registry/tool-registry";
 import type { FreedcampApiClient } from "./api-client";
 import { listProjectsSchema, createListProjectsHandler, getProjectSchema, createGetProjectHandler } from "./tools/projects";
 import { listUsersSchema, createListUsersHandler, getUserSchema, createGetUserHandler } from "./tools/users";
+import { listTasksSchema, createListTasksHandler, getTaskSchema, createGetTaskHandler } from "./tools/tasks";
 import { healthCheckSchema } from "./tools/health";
 
 export function registerAllTools(client: FreedcampApiClient, apiKey: string, apiSecret: string, baseUrl?: string): void {
@@ -20,7 +21,6 @@ export function registerAllTools(client: FreedcampApiClient, apiKey: string, api
     requiredPageKey: "health",
     accessLevel: "READ",
     handler: async (_ctx, _input) => {
-      // Import handler directly to avoid circular deps
       const { healthCheckHandler } = await import("./tools/health");
       return healthCheckHandler(apiKey, apiSecret, baseUrl);
     },
@@ -62,6 +62,25 @@ export function registerAllTools(client: FreedcampApiClient, apiKey: string, api
     requiredPageKey: "users",
     accessLevel: "READ",
     handler: createGetUserHandler(client),
+  });
+
+  // Tasks
+  toolRegistry.register({
+    name: "task.list",
+    description: "List tasks in a project with full filter support: assigned user, status (0/1/2 or labels), date ranges, tags, search. Defaults f_include_tags=1 to prevent data loss. Supports pagination, sort, and field limiting.",
+    inputSchema: listTasksSchema,
+    requiredPageKey: "tasks",
+    accessLevel: "READ",
+    handler: createListTasksHandler(client),
+  });
+
+  toolRegistry.register({
+    name: "task.get",
+    description: "Get a single task by ID with comments and tag detail. Defaults f_include_tr_data=1 and f_include_tags=1. Injects task_url field. Supports field limiting.",
+    inputSchema: getTaskSchema,
+    requiredPageKey: "tasks",
+    accessLevel: "READ",
+    handler: createGetTaskHandler(client),
   });
 
   toolRegistry.freeze();
