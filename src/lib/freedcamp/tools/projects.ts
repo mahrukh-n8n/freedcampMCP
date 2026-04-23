@@ -1,5 +1,5 @@
 /**
- * Project tools — list_projects, get_project
+ * Project tools — list_projects, get_project, create_project, update_project
  */
 
 import { z } from "zod";
@@ -24,7 +24,7 @@ export function createListProjectsHandler(client: FreedcampApiClient) {
     const sortParams: Record<string, "asc" | "desc"> = {};
     if (input.order) {
       for (const [field, dir] of Object.entries(input.order)) {
-        sortParams[field] = dir;
+        sortParams[field] = dir as "asc" | "desc";
       }
     }
 
@@ -65,6 +65,74 @@ export function createGetProjectHandler(client: FreedcampApiClient) {
       method: "GET",
       params,
       fields: input.fields,
+    });
+  };
+}
+
+// ── create_project ───────────────────────────────────────────────────────────
+
+export const createProjectSchema = z.object({
+  project_name: z.string().min(1).describe("Project name (required)"),
+  project_description: z.string().optional().describe("Project description"),
+  project_color: z.string().optional().describe("Project color (hex, e.g. #FF0000)"),
+  todo_view_type: z.number().int().optional().describe("View type for todo app"),
+  group_id: z.number().int().optional().describe("Group ID to add project to"),
+  group_name: z.string().optional().describe("Group name — creates group if group_id not set"),
+});
+
+export type CreateProjectInput = z.infer<typeof createProjectSchema>;
+
+export function createCreateProjectHandler(client: FreedcampApiClient) {
+  return async (_ctx: unknown, rawInput: unknown): Promise<McpToolResult> => {
+    const input = rawInput as CreateProjectInput;
+
+    const body: Record<string, unknown> = {
+      project_name: input.project_name,
+    };
+
+    if (input.project_description !== undefined) body.project_description = input.project_description;
+    if (input.project_color !== undefined) body.project_color = input.project_color;
+    if (input.todo_view_type !== undefined) body.todo_view_type = input.todo_view_type;
+    if (input.group_id !== undefined) body.group_id = input.group_id;
+    if (input.group_name !== undefined) body.group_name = input.group_name;
+
+    return client.request("/projects", {
+      method: "POST",
+      body,
+    });
+  };
+}
+
+// ── update_project ───────────────────────────────────────────────────────────
+
+export const updateProjectSchema = z.object({
+  project_id: z.union([z.number().int(), z.string()]).describe("Project ID or name to update"),
+  project_name: z.string().optional().describe("New project name"),
+  project_description: z.string().optional().describe("New project description"),
+  project_color: z.string().optional().describe("New project color (hex)"),
+  todo_view_type: z.number().int().optional().describe("New view type for todo app"),
+  group_id: z.number().int().optional().describe("New group ID"),
+  group_name: z.string().optional().describe("New group name"),
+});
+
+export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
+
+export function createUpdateProjectHandler(client: FreedcampApiClient) {
+  return async (_ctx: unknown, rawInput: unknown): Promise<McpToolResult> => {
+    const input = rawInput as UpdateProjectInput;
+
+    const body: Record<string, unknown> = {};
+
+    if (input.project_name !== undefined) body.project_name = input.project_name;
+    if (input.project_description !== undefined) body.project_description = input.project_description;
+    if (input.project_color !== undefined) body.project_color = input.project_color;
+    if (input.todo_view_type !== undefined) body.todo_view_type = input.todo_view_type;
+    if (input.group_id !== undefined) body.group_id = input.group_id;
+    if (input.group_name !== undefined) body.group_name = input.group_name;
+
+    return client.request(`/projects/${input.project_id}`, {
+      method: "PUT",
+      body,
     });
   };
 }

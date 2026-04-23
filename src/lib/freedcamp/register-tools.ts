@@ -7,7 +7,12 @@
 
 import { toolRegistry } from "../../modules/mcp/registry/tool-registry";
 import type { FreedcampApiClient } from "./api-client";
-import { listProjectsSchema, createListProjectsHandler, getProjectSchema, createGetProjectHandler } from "./tools/projects";
+import {
+  listProjectsSchema, createListProjectsHandler,
+  getProjectSchema, createGetProjectHandler,
+  createProjectSchema, createCreateProjectHandler,
+  updateProjectSchema, createUpdateProjectHandler,
+} from "./tools/projects";
 import { listUsersSchema, createListUsersHandler, getUserSchema, createGetUserHandler } from "./tools/users";
 import {
   listTasksSchema, createListTasksHandler,
@@ -33,7 +38,7 @@ export function registerAllTools(client: FreedcampApiClient, apiKey: string, api
     },
   });
 
-  // Projects
+  // Projects — read
   toolRegistry.register({
     name: "project.list",
     description: "List all projects the authenticated user has access to. Supports pagination, sorting, and field limiting.",
@@ -45,11 +50,30 @@ export function registerAllTools(client: FreedcampApiClient, apiKey: string, api
 
   toolRegistry.register({
     name: "project.get",
-    description: "Get details of a single project by ID. Supports field limiting.",
+    description: "Get details of a single project by ID or name. Supports field limiting.",
     inputSchema: getProjectSchema,
     requiredPageKey: "projects",
     accessLevel: "READ",
     handler: createGetProjectHandler(client),
+  });
+
+  // Projects — write
+  toolRegistry.register({
+    name: "project.create",
+    description: "Create a new project. Requires project_name. Optionally set description, color, view type, and group.",
+    inputSchema: createProjectSchema,
+    requiredPageKey: "projects",
+    accessLevel: "WRITE",
+    handler: createCreateProjectHandler(client),
+  });
+
+  toolRegistry.register({
+    name: "project.update",
+    description: "Update an existing project. Only provided fields are changed. Accepts project ID or name.",
+    inputSchema: updateProjectSchema,
+    requiredPageKey: "projects",
+    accessLevel: "WRITE",
+    handler: createUpdateProjectHandler(client),
   });
 
   // Users
