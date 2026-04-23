@@ -17,6 +17,11 @@ import { logger } from "./utils/logger";
 import type { McpToolResult } from "../../modules/mcp/types";
 import { dataResult, errorResult } from "../../modules/mcp/utils/serialize";
 
+// Node fetch doesn't need an explicit agent, but we configure
+// keep-alive and connection pooling via the fetch dispatcher.
+// For Node 18+, the default undici dispatcher supports keep-alive.
+const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT_REQUESTS ?? "", 10) || 6;
+
 export type FreedcampClientConfig = {
   apiKey: string;
   apiSecret: string;
