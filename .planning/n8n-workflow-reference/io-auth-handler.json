@@ -1,0 +1,147 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "97d446d2-4b87-4c03-ae06-43ef07bc6e72",
+              "name": "api_key",
+              "value": "645b03b208ae898b98d4c555c8bcae9ca4d3647d",
+              "type": "string"
+            },
+            {
+              "id": "e36aa956-66b2-4f47-87e1-4ec1bb801d9b",
+              "name": "secret",
+              "value": "cc6da189c3075314c6ed09d9561f4453b870281a",
+              "type": "string"
+            },
+            {
+              "id": "d7fab9cc-ec8b-47cd-b46c-0a55967772c1",
+              "name": "timestamp",
+              "value": "={{ $now / 1000 | floor}}",
+              "type": "string"
+            },
+            {
+              "id": "6b741c11-ea9f-4a87-9d87-4f240d9399fb",
+              "name": "apiendpoint",
+              "value": "={{ $('FreedCamp Get Request').item.json.apiendpoint }}",
+              "type": "string"
+            },
+            {
+              "id": "500e601b-5fab-4694-ae79-16f52b24d3fd",
+              "name": "params",
+              "value": "={{ $('FreedCamp Get Request').item.json.params}}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-832, 192],
+      "id": "411ed19f-44c3-48f1-a25e-9b17083830ed",
+      "name": "data"
+    },
+    {
+      "parameters": {
+        "jsCode": "const crypto = require('crypto');\n\nconst apiKey = $input.all()[0].json.api_key;\nconst apiSecret = $input.all()[0].json.secret;\nconst timestamp = String($input.all()[0].json.timestamp);\n\nconst hash = crypto.createHmac('sha1', apiSecret)\n  .update(apiKey + timestamp)\n  .digest('hex');\n\nreturn [{\n  json: {\n    api_key: apiKey,\n    timestamp: timestamp,\n    hash: hash\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-608, 192],
+      "id": "8f26f737-b3af-4617-9fb9-94f5da207453",
+      "name": "crypto"
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            { "name": "apiendpoint" },
+            { "name": "params", "type": "object" },
+            { "name": "request_type" },
+            { "name": "required_outputs", "type": "array" }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [-1392, 288],
+      "id": "d55631fe-0918-4789-8736-51b6a44206e6",
+      "name": "FreedCamp Get Request"
+    },
+    {
+      "parameters": {
+        "url": "=https://freedcamp.com/api/v1{{ $('data').item.json.apiendpoint }}?api_key={{ $json.api_key }}&timestamp={{ $json.timestamp }}&hash={{ $json.hash }}&{{$('url params for get').item.json.url_params}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [80, 80],
+      "id": "dad2102a-de6f-4193-8181-c7347e78146a",
+      "name": "GET API",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://freedcamp.com/api/v1{{$('data').item.json.apiendpoint }}",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "api_key", "value": "={{ $('crypto').item.json.api_key }}" },
+            { "name": "timestamp", "value": "={{ $('crypto').item.json.timestamp }}" },
+            { "name": "hash", "value": "={{ $('crypto').item.json.hash }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{$json}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [96, 288],
+      "id": "7d22b7cf-50eb-4f85-bcf8-736a91272753",
+      "name": "Post API",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// convert string parameters to valid json object\nconst nodeData = $('FreedCamp Get Request').all()[0].json.params;\nconst paramString = typeof nodeData === 'string' ? JSON.parse(nodeData) : nodeData;\nreturn [{ json: paramString }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-176, 224],
+      "id": "adc5223c-edfd-43b9-ac02-0e3193e7b042",
+      "name": "create JSON Params",
+      "executeOnce": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawParams = $('FreedCamp Get Request').all()[0].json.params;\nconst data = typeof rawParams === 'string' ? JSON.parse(rawParams) : rawParams;\nconst params = [];\nfor (const [key, value] of Object.entries(data)) {\n  if (Array.isArray(value)) {\n    const keyName = key.endsWith('[]') ? key : `${key}[]`;\n    for (const item of value) {\n      params.push(`${encodeURIComponent(String(keyName))}=${encodeURIComponent(String(item))}`);\n    }\n  } else {\n    params.push(`${encodeURIComponent(String(key))}=${encodeURIComponent(String(value))}`);\n  }\n}\nconst urlParams = params.join('&');\nreturn [{ json: { url_params: urlParams } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-1216, 288],
+      "id": "937f320b-2f73-460d-a598-016afe90f635",
+      "name": "url params for get",
+      "executeOnce": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// filter for required outputs with dot notation\nfunction getValueByPath(obj, path, keepArrays = true) {\n  try {\n    const parts = path.split('.');\n    const current = obj;\n    if (current[parts[0]] === undefined || current[parts[0]] === null) return null;\n    if (parts.length === 1) return current[parts[0]];\n    const firstPart = parts[0];\n    const restPath = parts.slice(1).join('.');\n    const firstValue = current[firstPart];\n    if (Array.isArray(firstValue)) {\n      if (keepArrays) {\n        const results = [];\n        for (const item of firstValue) {\n          const itemValue = getValueByPath(item, restPath, keepArrays);\n          if (itemValue !== null) results.push(itemValue);\n        }\n        return results.length > 0 ? results : null;\n      } else {\n        const results = [];\n        for (const item of firstValue) {\n          const itemValue = getValueByPath(item, restPath, keepArrays);\n          if (itemValue !== null) results.push(String(itemValue));\n        }\n        return results.length > 0 ? results.join(' | ') : null;\n      }\n    }\n    return getValueByPath(firstValue, restPath, keepArrays);\n  } catch (e) { return null; }\n}\n\ntry {\n  const inputData = $('If sucessful').all()[0].json;\n  let requiredFields = $('FreedCamp Get Request').all()[0].json.required_outputs;\n  if (typeof requiredFields === 'string') requiredFields = JSON.parse(requiredFields);\n  const dataObj = inputData.data;\n  let tasks = dataObj.tasks || dataObj.projects || dataObj.users || dataObj.comments;\n  if (!tasks || !Array.isArray(tasks) || tasks.length === 0) {\n    return [{ json: { error: 'No tasks/projects/users found' } }];\n  }\n  const results = [];\n  for (const task of tasks) {\n    const result = {};\n    for (const field of requiredFields) {\n      const value = getValueByPath(task, field, true);\n      const parentPathValue = getValueByPath(dataObj, field, true);\n      if (value !== null) result[field] = value;\n      else if (parentPathValue !== null) result[field] = parentPathValue;\n    }\n    if (Object.keys(result).length > 0) results.push({ json: result });\n  }\n  if (results.length === 0) return [{ json: { error: 'No matching data found for the required fields' } }];\n  return results;\n} catch (e) {\n  return [{ json: { error: `Processing error: ${e.message}` } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [896, 192],
+      "id": "21031715-eabe-4ce5-a246-1248ba413eb9",
+      "name": "filter for required outputs",
+      "alwaysOutputData": true
+    }
+  ],
+  "_note": "Simplified version of the IO & auth workflow showing key logic: HMAC auth, GET/POST routing, url params encoding with [] suffix, and required_outputs field filtering with dot notation"
+}
