@@ -88,14 +88,14 @@ export class FreedcampApiClient {
     url.searchParams.set("timestamp", auth.timestamp);
     url.searchParams.set("hash", auth.hash);
 
-    // Build query params based on method
+    // Build query params
     const queryParams = encodeAllParams(params, pagination, sort);
 
     if (method === "GET") {
       // GET: all params in query string
-      for (const [key, value] of Object.entries(queryParams)) {
-        url.searchParams.set(key, value);
-      }
+      queryParams.forEach((value, key) => {
+        url.searchParams.append(key, value);
+      });
     }
 
     // For POST/PUT/DELETE: auth in query, body as JSON
@@ -107,20 +107,25 @@ export class FreedcampApiClient {
     };
 
     if (isBodyMethod && body) {
-      // Merge queryParams into body for POST methods
-      fetchOptions.body = JSON.stringify({
-        ...body,
-        ...Object.fromEntries(
-          Object.entries(queryParams).filter(([k]) => !k.includes("[") && !k.startsWith("order"))
-        ),
+      // Non-array, non-sort query params merge into body
+      const bodyParams: Record<string, unknown> = {};
+      queryParams.forEach((value, key) => {
+        if (!key.includes("[") && !key.startsWith("order")) {
+          bodyParams[key] = value;
+        }
       });
-    } else if (isBodyMethod && Object.keys(queryParams).length > 0) {
-      // Multi-value and sort params go in URL even for POST
-      for (const [key, value] of Object.entries(queryParams)) {
+      // Multi-value and sort params stay in URL
+      queryParams.forEach((value, key) => {
         if (key.includes("[") || key.startsWith("order")) {
           url.searchParams.append(key, value);
         }
-      }
+      });
+      fetchOptions.body = JSON.stringify({ ...body, ...bodyParams });
+    } else if (isBodyMethod) {
+      // No body — multi-value and sort params go in URL
+      queryParams.forEach((value, key) => {
+        url.searchParams.append(key, value);
+      });
     }
 
     return this.executeWithRetry<T>(url.toString(), fetchOptions, fields, signal);
@@ -201,16 +206,16 @@ export class FreedcampApiClient {
 }
 
 /**
- * Encode all request params into flat key-value pairs.
+ * Encode all request params into URLSearchParams.
  * Handles multi-value arrays with [] suffix, sort with order[] prefix,
  * and pagination limit/offset.
  */
-function encodeAllParams(
+export function encodeAllParams(
   params?: Record<string, unknown>,
   pagination?: PaginationParams,
   sort?: SortParams
-): Record<string, string> {
-  const result: Record<string, string> = {};
+): URLSearchParams {
+  const result = new URLSearchParams();
 
   // Regular params
   if (params) {
@@ -220,28 +225,28 @@ function encodeAllParams(
       // Multi-value fields (arrays) use [] suffix
       if (Array.isArray(value)) {
         for (const item of value) {
-          result[`${key}[]`] = String(item);
+          result.append(`${key}[]`, String(item));
         }
       } else if (typeof value === "object" && value !== null) {
         // Skip nested objects at this level
       } else {
-        result[key] = String(value);
+        result.set(key, String(value));
       }
     }
   }
 
   // Pagination
   if (pagination?.limit !== undefined) {
-    result["limit"] = String(pagination.limit);
+    result.set("limit", String(pagination.limit));
   }
   if (pagination?.offset !== undefined) {
-    result["offset"] = String(pagination.offset);
+    result.set("offset", String(pagination.offset));
   }
 
   // Sort: order[field]=asc|desc
   if (sort) {
     for (const [field, direction] of Object.entries(sort)) {
-      result[`order[${field}]`] = direction;
+      result.set(`order[${field}]`, direction);
     }
   }
 

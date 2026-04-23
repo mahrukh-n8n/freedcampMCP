@@ -56,8 +56,9 @@ export function applyFieldLimiting(
   return filterObject(data, fieldList);
 }
 
-function filterObject(obj: unknown, fields: string[]): Record<string, unknown> | null {
-  if (obj === null || obj === undefined) return null;
+function filterObject(obj: unknown, fields: string[]): Record<string, unknown> | null | undefined {
+  if (obj === undefined) return undefined;
+  if (obj === null) return null;
   if (typeof obj !== "object") return null;
 
   const result: Record<string, unknown> = {};
