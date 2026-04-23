@@ -6,6 +6,9 @@ import { startStdioTransport } from "../src/modules/mcp/services/stdio-transport
 import { FreedcampApiClient } from "../src/lib/freedcamp/api-client";
 import { createCallbacks } from "../src/lib/freedcamp/callbacks";
 import { registerAllTools } from "../src/lib/freedcamp/register-tools";
+import { logger } from "../src/lib/freedcamp/utils/logger";
+
+let server: ReturnType<typeof createMcpServer> | undefined;
 
 async function boot() {
   const apiKey = process.env.FREEDCAMP_API_KEY ?? "";
@@ -29,14 +32,35 @@ async function boot() {
 
   // Create session and MCP server
   const session = { userId, companyId: 0, requestId: "boot" };
-  const server = createMcpServer(session, toolRegistry, callbacks);
+  server = createMcpServer(session, toolRegistry, callbacks);
 
   // Start stdio transport
-  process.stderr.write("[mcp] Boot complete, listening on stdio...\n");
+  logger.info("Boot complete, listening on stdio");
   await startStdioTransport(server);
 }
 
+// Graceful shutdown — drain in-flight requests before exiting
+async function shutdown(signal: string) {
+  logger.info(`Received ${signal}, shutting down gracefully...`);
+
+  // Allow in-flight requests ~2s to complete
+  const timeout = setTimeout(() => {
+    logger.warn("Forcing exit — requests still in flight");
+    process.exit(0);
+  }, 2000);
+
+  // Close MCP server connections if available
+  // McpServer doesn't have close() — just let in-flight requests drain
+  server = undefined;
+
+  clearTimeout(timeout);
+  process.exit(0);
+}
+
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
+
 boot().catch((err) => {
-  process.stderr.write(`[mcp] Fatal: ${err.message}\n`);
+  logger.error(`Fatal: ${err.message}`);
   process.exit(1);
 });

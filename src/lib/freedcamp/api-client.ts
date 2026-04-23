@@ -13,6 +13,7 @@
 
 import { buildAuthParams, type AuthParams } from "./auth/hmac";
 import { applyFieldLimiting } from "./utils/field-limiter";
+import { logger } from "./utils/logger";
 import type { McpToolResult } from "../../modules/mcp/types";
 import { dataResult, errorResult } from "../../modules/mcp/utils/serialize";
 
@@ -68,7 +69,7 @@ export class FreedcampApiClient {
     this.apiSecret = config.apiSecret;
     this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
     this.maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
-    this.requestTimeoutMs = config.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    this.requestTimeoutMs = config.requestTimeoutMs ?? (parseInt(process.env.REQUEST_TIMEOUT_MS ?? "", 10) || DEFAULT_REQUEST_TIMEOUT_MS);
   }
 
   /**
@@ -141,6 +142,8 @@ export class FreedcampApiClient {
     signal?: AbortSignal,
     attempt: number = 0
   ): Promise<McpToolResult> {
+    logger.debug(`Request: ${options.method} ${url} (attempt ${attempt + 1})`);
+
     try {
       const response = await fetch(url, options);
 
@@ -167,6 +170,7 @@ export class FreedcampApiClient {
       if (response.status === 429 || response.status >= 500) {
         if (attempt < this.maxRetries - 1) {
           const delayMs = Math.pow(2, attempt) * 1000 + Math.random() * 500;
+          logger.warn(`Retrying ${url} after ${response.status} (attempt ${attempt + 1}, delay ${delayMs}ms)`);
           await new Promise((resolve) => setTimeout(resolve, delayMs));
           return this.executeWithRetry<T>(url, options, fields, signal, attempt + 1);
         }
