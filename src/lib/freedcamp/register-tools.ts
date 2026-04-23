@@ -13,7 +13,13 @@ import {
   createProjectSchema, createCreateProjectHandler,
   updateProjectSchema, createUpdateProjectHandler,
 } from "./tools/projects";
-import { listUsersSchema, createListUsersHandler, getUserSchema, createGetUserHandler } from "./tools/users";
+import {
+  listUsersSchema, createListUsersHandler,
+  getUserSchema, createGetUserHandler,
+  getCurrentUserSchema, createGetCurrentUserHandler,
+  createUserSchema, createCreateUserHandler,
+  updateCurrentUserSchema, createUpdateCurrentUserHandler,
+} from "./tools/users";
 import {
   listTasksSchema, createListTasksHandler,
   getTaskSchema, createGetTaskHandler,
@@ -76,7 +82,7 @@ export function registerAllTools(client: FreedcampApiClient, apiKey: string, api
     handler: createUpdateProjectHandler(client),
   });
 
-  // Users
+  // Users — read
   toolRegistry.register({
     name: "user.list",
     description: "List users. Optionally filter by project_id. Supports pagination and field limiting.",
@@ -93,6 +99,34 @@ export function registerAllTools(client: FreedcampApiClient, apiKey: string, api
     requiredPageKey: "users",
     accessLevel: "READ",
     handler: createGetUserHandler(client),
+  });
+
+  toolRegistry.register({
+    name: "user.current",
+    description: "Get the authenticated user's profile. Supports field limiting.",
+    inputSchema: getCurrentUserSchema,
+    requiredPageKey: "users",
+    accessLevel: "READ",
+    handler: createGetCurrentUserHandler(client),
+  });
+
+  // Users — write
+  toolRegistry.register({
+    name: "user.create",
+    description: "Create a new user. Requires email, password, and first_name.",
+    inputSchema: createUserSchema,
+    requiredPageKey: "users",
+    accessLevel: "WRITE",
+    handler: createCreateUserHandler(client),
+  });
+
+  toolRegistry.register({
+    name: "user.update_current",
+    description: "Update the authenticated user's profile. Requires confirmation_password when changing password.",
+    inputSchema: updateCurrentUserSchema,
+    requiredPageKey: "users",
+    accessLevel: "WRITE",
+    handler: createUpdateCurrentUserHandler(client),
   });
 
   // Tasks — read
