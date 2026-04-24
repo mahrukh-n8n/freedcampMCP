@@ -25,14 +25,15 @@ function buildTaskUrl(projectId: number | string, taskId: number | string): stri
 async function resolveUserIds(
   client: FreedcampApiClient,
   ids: (number | string)[]
-): Promise<number[]> {
+): Promise<{ ids: number[] | null; error?: string }> {
   const resolved: number[] = [];
   for (const id of ids) {
     const r = await resolveUserId(client, id);
     if (r) resolved.push(r.id);
-    else resolved.push(typeof id === "number" ? id : Number(id));
+    else if (typeof id === "number") resolved.push(id);
+    else return { ids: null, error: `User not found: "${id}"` };
   }
-  return resolved;
+  return { ids: resolved };
 }
 
 // ── list_tasks ────────────────────────────────────────────────────────────────
@@ -92,7 +93,9 @@ export function createListTasksHandler(client: FreedcampApiClient) {
 
     // assigned_to_id → resolve names/emails to IDs, encoded as multi-value array
     if (input.assigned_to_id !== undefined) {
-      params.assigned_to_id = await resolveUserIds(client, input.assigned_to_id);
+      const result = await resolveUserIds(client, input.assigned_to_id);
+      if (!result.ids) return { ok: false, kind: "data" as const, error: result.error!, errorCode: "NOT_FOUND" as const };
+      params.assigned_to_id = result.ids;
     }
 
     // status → map string labels to numeric, encoded as multi-value
@@ -102,7 +105,9 @@ export function createListTasksHandler(client: FreedcampApiClient) {
     }
 
     if (input.created_by_id !== undefined) {
-      params.created_by_id = await resolveUserIds(client, input.created_by_id);
+      const result = await resolveUserIds(client, input.created_by_id);
+      if (!result.ids) return { ok: false, kind: "data" as const, error: result.error!, errorCode: "NOT_FOUND" as const };
+      params.created_by_id = result.ids;
     }
     if (input.search !== undefined) params.search = input.search;
 
@@ -259,7 +264,11 @@ export function createCreateTaskHandler(client: FreedcampApiClient) {
     if (input.task_group_id !== undefined) body.task_group_id = input.task_group_id;
     if (input.description !== undefined) body.description = input.description;
     if (input.priority !== undefined) body.priority = input.priority;
-    if (input.assigned_to_id !== undefined) body.assigned_to_id = await resolveUserIds(client, input.assigned_to_id);
+    if (input.assigned_to_id !== undefined) {
+      const result = await resolveUserIds(client, input.assigned_to_id);
+      if (!result.ids) return { ok: false, kind: "data" as const, error: result.error!, errorCode: "NOT_FOUND" as const };
+      body.assigned_to_id = result.ids;
+    }
     if (input.status !== undefined) body.status = toStatusCode(input.status);
     if (input.start_date !== undefined) body.start_date = input.start_date;
     if (input.due_date !== undefined) body.due_date = input.due_date;
@@ -320,7 +329,11 @@ export function createUpdateTaskHandler(client: FreedcampApiClient) {
     if (input.task_group_id !== undefined) body.task_group_id = input.task_group_id;
     if (input.description !== undefined) body.description = input.description;
     if (input.priority !== undefined) body.priority = input.priority;
-    if (input.assigned_to_id !== undefined) body.assigned_to_id = await resolveUserIds(client, input.assigned_to_id);
+    if (input.assigned_to_id !== undefined) {
+      const result = await resolveUserIds(client, input.assigned_to_id);
+      if (!result.ids) return { ok: false, kind: "data" as const, error: result.error!, errorCode: "NOT_FOUND" as const };
+      body.assigned_to_id = result.ids;
+    }
     if (input.status !== undefined) body.status = toStatusCode(input.status);
     if (input.start_date !== undefined) body.start_date = input.start_date;
     if (input.due_date !== undefined) body.due_date = input.due_date;
@@ -387,7 +400,9 @@ export function createAssignTaskHandler(client: FreedcampApiClient) {
       project_id: resolved.id,
     };
     if (input.user_id !== undefined) {
-      body.user_id = await resolveUserIds(client, input.user_id);
+      const result = await resolveUserIds(client, input.user_id);
+      if (!result.ids) return { ok: false, kind: "data" as const, error: result.error!, errorCode: "NOT_FOUND" as const };
+      body.user_id = result.ids;
     }
 
     return client.request(`/tasks/${input.task_id}/assign`, {

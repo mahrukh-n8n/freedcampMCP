@@ -15,7 +15,7 @@ import { buildAuthParams, type AuthParams } from "./auth/hmac";
 import { filterResponse } from "./utils/response-filter";
 import { logger } from "./utils/logger";
 import type { McpToolResult } from "../../modules/mcp/types";
-import { dataResult, errorResult } from "../../modules/mcp/utils/serialize";
+import { dataResult, commitResult, errorResult } from "../../modules/mcp/utils/serialize";
 
 export type FreedcampClientConfig = {
   apiKey: string;
@@ -129,7 +129,7 @@ export class FreedcampApiClient {
       });
     }
 
-    return this.executeWithRetry<T>(url.toString(), fetchOptions, fields, signal);
+    return this.executeWithRetry<T>(url.toString(), fetchOptions, fields, isBodyMethod, signal);
   }
 
   /**
@@ -139,6 +139,7 @@ export class FreedcampApiClient {
     url: string,
     options: RequestInit,
     fields: string | string[] | undefined,
+    isWrite: boolean,
     signal?: AbortSignal,
     attempt: number = 0
   ): Promise<McpToolResult> {
@@ -172,7 +173,7 @@ export class FreedcampApiClient {
           const delayMs = Math.pow(2, attempt) * 1000 + Math.random() * 500;
           logger.warn(`Retrying ${url} after ${response.status} (attempt ${attempt + 1}, delay ${delayMs}ms)`);
           await new Promise((resolve) => setTimeout(resolve, delayMs));
-          return this.executeWithRetry<T>(url, options, fields, signal, attempt + 1);
+          return this.executeWithRetry<T>(url, options, fields, isWrite, signal, attempt + 1);
         }
         if (response.status === 429) {
           return errorResult("Rate limited — too many requests", "INTERNAL_ERROR");
@@ -190,11 +191,17 @@ export class FreedcampApiClient {
       // Apply response filter: strip internal fields, apply field limiting
       const filtered = filterResponse(json, fields);
 
-      return dataResult({
+      // Use commit envelope for write operations, data envelope for reads
+      const resultData = {
         data: filtered?.data ?? json,
         meta: filtered?.meta ?? json.meta ?? {},
         ...(json.url ? { url: json.url } : {}),
-      });
+      };
+
+      if (isWrite) {
+        return commitResult(resultData);
+      }
+      return dataResult(resultData);
     } catch (err) {
       if (signal?.aborted) {
         return errorResult("Request cancelled", "INTERNAL_ERROR");
