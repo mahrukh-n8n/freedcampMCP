@@ -65,10 +65,26 @@ function filterObject(obj: unknown, fields: string[]): Record<string, unknown> |
   for (const field of fields) {
     const value = getValueByPath(obj, field);
     if (value !== undefined) {
-      // Use the last segment of the path as the key, or the full path
-      const key = field.includes(".") ? field : field;
-      result[key] = value;
+      // Reconstruct nested structure for dot-notation paths
+      setNestedValue(result, field, value);
     }
   }
   return result;
+}
+
+/**
+ * Set a value at a dot-notation path in a nested object.
+ * "comments.created_ts" → result.comments.created_ts
+ */
+function setNestedValue(obj: Record<string, unknown>, path: string, value: unknown): void {
+  const parts = path.split(".");
+  let current: Record<string, unknown> = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i];
+    if (!(part in current) || typeof current[part] !== "object" || current[part] === null) {
+      current[part] = {};
+    }
+    current = current[part] as Record<string, unknown>;
+  }
+  current[parts[parts.length - 1]] = value;
 }

@@ -21,7 +21,7 @@ describe("Field limiter — dot-notation extraction", () => {
   it("extracts nested fields with dot notation", () => {
     const data = { id: 1, nested: { a: 1, b: 2 } };
     const result = applyFieldLimiting(data, "id,nested.a");
-    expect(result).toEqual({ id: 1, "nested.a": 1 });
+    expect(result).toEqual({ id: 1, nested: { a: 1 } });
   });
 
   it("applies field limiting to each element in array", () => {

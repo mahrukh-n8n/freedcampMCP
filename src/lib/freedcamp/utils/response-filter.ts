@@ -66,12 +66,8 @@ export function filterResponse(
   const raw = response as RawApiResponse;
   let data: unknown = raw.data ?? raw;
 
-  // Strip internal fields from each object
-  if (Array.isArray(data)) {
-    data = (data as Record<string, unknown>[]).map(stripInternalFields);
-  } else if (typeof data === "object" && data !== null) {
-    data = stripInternalFields(data as Record<string, unknown>);
-  }
+  // Strip internal fields recursively
+  data = stripInternalFields(data);
 
   // Apply field limiting if requested
   if (requestedFields) {
@@ -86,14 +82,21 @@ export function filterResponse(
 }
 
 /**
- * Strip internal API fields from a single object.
+ * Strip internal API fields recursively from objects and arrays.
  */
-function stripInternalFields(obj: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (!INTERNAL_FIELDS.has(key)) {
-      result[key] = value;
-    }
+function stripInternalFields(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stripInternalFields);
   }
-  return result;
+  if (typeof value === "object" && value !== null) {
+    const obj = value as Record<string, unknown>;
+    const result: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(obj)) {
+      if (!INTERNAL_FIELDS.has(key)) {
+        result[key] = stripInternalFields(val);
+      }
+    }
+    return result;
+  }
+  return value;
 }

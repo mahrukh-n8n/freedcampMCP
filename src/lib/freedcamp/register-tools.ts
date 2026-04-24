@@ -99,7 +99,7 @@ export function registerAllTools(client: FreedcampApiClient, apiKey: string, api
 
   toolRegistry.register({
     name: "user.get",
-    description: "Get a single user by ID. Supports field limiting.",
+    description: "Get a single user by ID, email, or name. Supports field limiting.",
     inputSchema: getUserSchema,
     requiredPageKey: "users",
     accessLevel: "READ",

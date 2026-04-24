@@ -46,7 +46,7 @@ export function createListUsersHandler(client: FreedcampApiClient) {
 // ── get_user ────────────────────────────────────────────────────────────────
 
 export const getUserSchema = z.object({
-  user_id: z.union([z.number().int(), z.string()]).describe("User ID to look up"),
+  user_id: z.union([z.number().int(), z.string()]).describe("User ID, email, or name to look up"),
   fields: z.string().optional().describe("Comma-separated dot-notation fields to include"),
 });
 

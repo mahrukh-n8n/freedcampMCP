@@ -106,13 +106,29 @@ export function createListTasksHandler(client: FreedcampApiClient) {
       }
     }
 
-    return client.request("/tasks", {
+    const result = await client.request("/tasks", {
       method: "GET",
       params,
       pagination: { limit: input.limit, offset: input.offset },
       sort: Object.keys(sortParams).length > 0 ? sortParams : undefined,
       fields: input.fields,
     });
+
+    // Inject task_url into each task in the list (TASK-10)
+    if (result.ok && result.kind === "data") {
+      const payload = result.payload as Record<string, unknown>;
+      if (Array.isArray(payload.data)) {
+        for (const task of payload.data as Record<string, unknown>[]) {
+          const projectId = Number(task.project_id ?? resolved.id);
+          const taskId = Number(task.id);
+          if (taskId) {
+            task.task_url = buildTaskUrl(projectId, taskId);
+          }
+        }
+      }
+    }
+
+    return result;
   };
 }
 
