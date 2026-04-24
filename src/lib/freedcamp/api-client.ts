@@ -44,7 +44,7 @@ export type RequestConfig = {
   signal?: AbortSignal;
 };
 
-const DEFAULT_BASE_URL = "https://freedcamp.com";
+const DEFAULT_BASE_URL = "https://freedcamp.com/api/v1";
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 
