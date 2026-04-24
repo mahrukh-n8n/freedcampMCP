@@ -5,7 +5,22 @@
 import { z } from "zod";
 import type { McpToolResult } from "../../../modules/mcp/types";
 import type { FreedcampApiClient } from "../api-client";
-import { resolveProjectId } from "../utils/name-resolver";
+import { resolveProjectId, resolveUserId } from "../utils/name-resolver";
+
+/** Resolve an array of user identifiers (IDs, emails, or names) to numeric IDs. */
+async function resolveProjectUserIds(
+  client: FreedcampApiClient,
+  ids: (number | string)[]
+): Promise<{ ids: number[] | null; error?: string }> {
+  const resolved: number[] = [];
+  for (const id of ids) {
+    const r = await resolveUserId(client, id);
+    if (r) resolved.push(r.id);
+    else if (typeof id === "number") resolved.push(id);
+    else return { ids: null, error: `User not found: "${id}"` };
+  }
+  return { ids: resolved };
+}
 
 // ── list_projects ───────────────────────────────────────────────────────────
 
@@ -87,9 +102,9 @@ export const createProjectSchema = z.object({
   group_id: z.number().int().optional().describe("Group ID to add project to"),
   group_name: z.string().optional().describe("Group name — creates group if group_id not set"),
   f_first: z.number().int().min(0).max(1).optional().describe("Set to 1 to mark as first project"),
-  changed_users: z.union([z.number().int(), z.array(z.number().int())]).optional()
+  changed_users: z.union([z.number().int(), z.string(), z.array(z.union([z.number().int(), z.string()]))]).optional()
     .transform((v) => (Array.isArray(v) ? v : v !== undefined ? [v] : undefined))
-    .describe("User IDs to add as project members"),
+    .describe("User IDs, emails, or names to add as project members"),
 });
 
 export type CreateProjectInput = z.infer<typeof createProjectSchema>;
@@ -108,7 +123,11 @@ export function createCreateProjectHandler(client: FreedcampApiClient) {
     if (input.group_id !== undefined) body.group_id = input.group_id;
     if (input.group_name !== undefined) body.group_name = input.group_name;
     if (input.f_first !== undefined) body.f_first = input.f_first;
-    if (input.changed_users !== undefined) body.changed_users = input.changed_users;
+    if (input.changed_users !== undefined) {
+      const resolved = await resolveProjectUserIds(client, input.changed_users);
+      if (resolved.error) return { ok: false, kind: "data" as const, error: resolved.error, errorCode: "NOT_FOUND" as const };
+      body.changed_users = resolved.ids;
+    }
 
     return client.request("/projects", {
       method: "POST",
@@ -128,9 +147,9 @@ export const updateProjectSchema = z.object({
   group_id: z.number().int().optional().describe("New group ID"),
   group_name: z.string().optional().describe("New group name"),
   f_first: z.number().int().min(0).max(1).optional().describe("Set to 1 to mark as first project"),
-  changed_users: z.union([z.number().int(), z.array(z.number().int())]).optional()
+  changed_users: z.union([z.number().int(), z.string(), z.array(z.union([z.number().int(), z.string()]))]).optional()
     .transform((v) => (Array.isArray(v) ? v : v !== undefined ? [v] : undefined))
-    .describe("User IDs to add as project members"),
+    .describe("User IDs, emails, or names to add as project members"),
 });
 
 export type UpdateProjectInput = z.infer<typeof updateProjectSchema>;
@@ -154,7 +173,11 @@ export function createUpdateProjectHandler(client: FreedcampApiClient) {
     if (input.group_id !== undefined) body.group_id = input.group_id;
     if (input.group_name !== undefined) body.group_name = input.group_name;
     if (input.f_first !== undefined) body.f_first = input.f_first;
-    if (input.changed_users !== undefined) body.changed_users = input.changed_users;
+    if (input.changed_users !== undefined) {
+      const res = await resolveProjectUserIds(client, input.changed_users);
+      if (res.error) return { ok: false, kind: "data" as const, error: res.error, errorCode: "NOT_FOUND" as const };
+      body.changed_users = res.ids;
+    }
 
     return client.request(`/projects/${resolved.id}`, {
       method: "PUT",

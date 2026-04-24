@@ -4,6 +4,7 @@
  * Extracts only the requested fields from a raw API response object.
  * Supports dot notation for nested fields: "comments.created_ts"
  * For array responses, filters each element individually.
+ * Preserves array-of-objects structure when extracting nested paths.
  */
 
 /**
@@ -19,7 +20,6 @@ export function getValueByPath(obj: unknown, path: string): unknown {
     if (typeof current === "object" && part in current) {
       current = (current as Record<string, unknown>)[part];
     } else if (Array.isArray(current)) {
-      // If current is an array, map over it
       return (current as unknown[]).map((item) => getValueByPath(item, parts.slice(parts.indexOf(part)).join(".")));
     } else {
       return undefined;
@@ -56,6 +56,12 @@ export function applyFieldLimiting(
   return filterObject(data, fieldList);
 }
 
+/**
+ * Filter an object to only include the requested dot-notation fields.
+ * Preserves array-of-objects structure: "comments.created_ts" on
+ * { comments: [{created_ts: 1, body: ...}] } produces
+ * { comments: [{created_ts: 1}] } not { comments: { created_ts: [1] } }
+ */
 function filterObject(obj: unknown, fields: string[]): Record<string, unknown> | null | undefined {
   if (obj === undefined) return undefined;
   if (obj === null) return null;
@@ -63,28 +69,74 @@ function filterObject(obj: unknown, fields: string[]): Record<string, unknown> |
 
   const result: Record<string, unknown> = {};
   for (const field of fields) {
-    const value = getValueByPath(obj, field);
-    if (value !== undefined) {
-      // Reconstruct nested structure for dot-notation paths
-      setNestedValue(result, field, value);
-    }
+    const parts = field.split(".");
+    pickPath(obj as Record<string, unknown>, parts, 0, result);
   }
   return result;
 }
 
 /**
- * Set a value at a dot-notation path in a nested object.
- * "comments.created_ts" → result.comments.created_ts
+ * Recursively pick a dot-notation path from source into target,
+ * preserving arrays of objects along the way.
  */
-function setNestedValue(obj: Record<string, unknown>, path: string, value: unknown): void {
-  const parts = path.split(".");
-  let current: Record<string, unknown> = obj;
-  for (let i = 0; i < parts.length - 1; i++) {
-    const part = parts[i];
-    if (!(part in current) || typeof current[part] !== "object" || current[part] === null) {
-      current[part] = {};
+function pickPath(
+  source: Record<string, unknown> | unknown[],
+  parts: string[],
+  partIndex: number,
+  target: Record<string, unknown>
+): boolean {
+  const key = parts[partIndex];
+  const isLast = partIndex === parts.length - 1;
+
+  if (Array.isArray(source)) {
+    // Source is an array — recurse into each element
+    const items: Record<string, unknown>[] = [];
+    for (const item of source) {
+      if (item !== null && typeof item === "object") {
+        const sub: Record<string, unknown> = {};
+        if (pickPath(item as Record<string, unknown>, parts, partIndex, sub)) {
+          items.push(sub);
+        }
+      }
     }
-    current = current[part] as Record<string, unknown>;
+    if (items.length > 0) {
+      target[key] = items;
+      return true;
+    }
+    return false;
   }
-  current[parts[parts.length - 1]] = value;
+
+  if (!(key in source)) return false;
+  const value = (source as Record<string, unknown>)[key];
+
+  if (isLast) {
+    target[key] = value;
+    return true;
+  }
+
+  if (Array.isArray(value)) {
+    // Need to recurse into the array items for the next path segment
+    const items: Record<string, unknown>[] = [];
+    for (const item of value) {
+      if (item !== null && typeof item === "object") {
+        const sub: Record<string, unknown> = {};
+        if (pickPath(item as Record<string, unknown>, parts, partIndex + 1, sub)) {
+          items.push(sub);
+        }
+      }
+    }
+    if (items.length > 0) {
+      target[key] = items;
+      return true;
+    }
+    return false;
+  }
+
+  if (value !== null && typeof value === "object") {
+    // Nested object — create the sub-key in target and recurse
+    if (!(key in target)) target[key] = {};
+    return pickPath(value as Record<string, unknown>, parts, partIndex + 1, target[key] as Record<string, unknown>);
+  }
+
+  return false;
 }

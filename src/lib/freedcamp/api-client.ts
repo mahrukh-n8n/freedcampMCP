@@ -186,6 +186,14 @@ export class FreedcampApiClient {
         return errorResult(`Unexpected error: ${response.status} ${text}`, "INTERNAL_ERROR");
       }
 
+      // Handle 204 No Content (common for DELETE responses)
+      if (response.status === 204) {
+        if (isWrite) {
+          return commitResult({ data: null, meta: {} });
+        }
+        return dataResult({ data: null, meta: {} });
+      }
+
       const json = await response.json() as FreedcampResponse<T>;
 
       // Apply response filter: strip internal fields, apply field limiting
