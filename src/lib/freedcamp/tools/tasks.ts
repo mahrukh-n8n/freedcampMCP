@@ -4,7 +4,9 @@
  * Freedcamp tasks endpoint: GET/POST /tasks, GET/PUT/DELETE /tasks/{id}
  * Default includes f_include_tags=1 to prevent silent data loss (TASK-06).
  * task_url constructed from project_id + task_id (TASK-10).
- * Status bidirectional mapping: "not started"↔0, "in progress"↔1, "completed"↔2 (TASK-08).
+ * Tag names resolved from tag IDs in list responses (TASK-12).
+ * Status: numeric codes are project-specific (custom status templates change 0/1/2 meanings).
+ * The response includes status_title which reflects the project's actual labels.
  */
 
 import { z } from "zod";
@@ -36,6 +38,84 @@ async function resolveUserIds(
   return { ids: resolved };
 }
 
+/** Tag ID→name cache, scoped per project to avoid stale entries across projects. */
+const tagCache = new Map<string, Map<string, string>>();
+
+/**
+ * Resolve tag IDs to tag names in a task list response.
+ * If the API response already includes a tags lookup object, use it directly.
+ * Otherwise, fetch tag details from a single task in the result to build the map.
+ */
+async function resolveTagNamesInResponse(
+  client: FreedcampApiClient,
+  result: McpToolResult,
+  projectId: number
+): Promise<void> {
+  if (result.kind !== "data" || !result.ok) return;
+
+  const payload = result.payload as Record<string, unknown>;
+  const data = payload.data as Record<string, unknown> | undefined;
+  if (!data || typeof data !== "object") return;
+
+  const tasks = Array.isArray(data)
+    ? data as Record<string, unknown>[]
+    : Array.isArray(data.tasks)
+      ? data.tasks as Record<string, unknown>[]
+      : null;
+  if (!tasks || tasks.length === 0) return;
+
+  // Check if API already returned a tags lookup object
+  let tagMap: Map<string, string> | undefined;
+  const rawTags = data.tags as Record<string, unknown>[] | undefined;
+  if (rawTags && Array.isArray(rawTags) && rawTags.length > 0 && typeof rawTags[0] === "object" && "title" in rawTags[0]) {
+    tagMap = new Map(rawTags.map(t => [String(t.id), String(t.title)]));
+  } else {
+    // Check cache first
+    const cacheKey = String(projectId);
+    const cached = tagCache.get(cacheKey);
+    if (cached && cached.size > 0) {
+      tagMap = cached;
+    } else {
+      // Fetch tag details from a single task that has tags
+      const taggedTask = tasks.find(t => {
+        const tags = t.tags as string[] | undefined;
+        return tags && tags.length > 0;
+      });
+
+      if (taggedTask) {
+        const taskId = Number(taggedTask.id);
+        try {
+          const detailResult = await client.request(`/tasks/${taskId}`, {
+            method: "GET",
+            params: { project_id: projectId, f_include_tr_data: 1, f_include_tags: 1 },
+          });
+          if (detailResult.ok && detailResult.kind === "data") {
+            const detailPayload = detailResult.payload as Record<string, unknown>;
+            const detailData = detailPayload.data as Record<string, unknown> | undefined;
+            const detailTags = detailData?.tags as Record<string, unknown>[] | undefined;
+            if (detailTags && Array.isArray(detailTags)) {
+              tagMap = new Map(detailTags.map(t => [String(t.id), String(t.title)]));
+              tagCache.set(cacheKey, tagMap);
+            }
+          }
+        } catch {
+          // Tag resolution is best-effort; don't fail the whole request
+        }
+      }
+    }
+  }
+
+  if (!tagMap || tagMap.size === 0) return;
+
+  // Replace tag ID arrays with tag name arrays on each task
+  for (const task of tasks) {
+    const tagIds = task.tags as string[] | undefined;
+    if (tagIds && Array.isArray(tagIds)) {
+      task.tag_names = tagIds.map(id => tagMap!.get(String(id)) ?? String(id));
+    }
+  }
+}
+
 // ── list_tasks ────────────────────────────────────────────────────────────────
 
 export const listTasksSchema = z.object({
@@ -46,7 +126,7 @@ export const listTasksSchema = z.object({
     .transform((v) => (Array.isArray(v) ? v : v !== undefined ? [v] : undefined))
     .describe("User ID(s), email(s), or name(s) to filter by assigned user"),
   status: z.union([z.number().int(), z.string(), z.array(z.union([z.number().int(), z.string()]))]).optional()
-    .describe("Status filter: 0=not started, 1=in progress, 2=completed; string labels accepted"),
+    .describe("Status filter: numeric status_id values or string labels. NOTE: projects with custom status templates may use different numeric mappings (e.g., 0=No Progress, 1=Completed). Check status_title in responses for correct labels. Standard mapping: 0=not started, 1=in progress, 2=completed"),
   created_by_id: z.union([z.number().int(), z.string(), z.array(z.union([z.number().int(), z.string()]))]).optional()
     .transform((v) => (Array.isArray(v) ? v : v !== undefined ? [v] : undefined))
     .describe("User ID(s), email(s), or name(s) who created the task"),
@@ -154,6 +234,11 @@ export function createListTasksHandler(client: FreedcampApiClient) {
       }
     }
 
+    // Resolve tag IDs to tag names in the response (TASK-12)
+    if (result.ok && result.kind === "data" && input.f_include_tags !== 0) {
+      await resolveTagNamesInResponse(client, result, resolved.id);
+    }
+
     return result;
   };
 }
@@ -213,6 +298,11 @@ export function createGetTaskHandler(client: FreedcampApiClient) {
       }
     }
 
+    // Resolve tag IDs to tag names (TASK-12)
+    if (result.ok && result.kind === "data" && input.f_include_tags !== 0) {
+      await resolveTagNamesInResponse(client, result, resolved.id);
+    }
+
     return result;
   };
 }
@@ -239,7 +329,7 @@ export const createTaskSchema = z.object({
     .transform((v) => (Array.isArray(v) ? v : v !== undefined ? [v] : undefined))
     .describe("User ID(s), email(s), or name(s) to assign"),
   status: z.union([z.number().int(), z.string()]).optional()
-    .describe("Status: 0=not started, 1=in progress, 2=completed, or string label"),
+    .describe("Status: numeric status_id or string label. NOTE: projects with custom status templates may use different mappings. Standard: 0=not started, 1=in progress, 2=completed"),
   start_date: z.string().optional().describe("Start date (YYYY-MM-DD)"),
   due_date: z.string().optional().describe("Due date (YYYY-MM-DD)"),
   r_rule: z.string().optional().describe("Recurrence rule (iCal RRULE format)"),
@@ -304,7 +394,7 @@ export const updateTaskSchema = z.object({
     .transform((v) => (Array.isArray(v) ? v : v !== undefined ? [v] : undefined))
     .describe("User ID(s), email(s), or name(s) to assign"),
   status: z.union([z.number().int(), z.string()]).optional()
-    .describe("Status: 0/1/2 or string label"),
+    .describe("Status: numeric status_id or string label. NOTE: projects with custom status templates may use different mappings"),
   start_date: z.string().optional().describe("Start date (YYYY-MM-DD)"),
   due_date: z.string().optional().describe("Due date (YYYY-MM-DD)"),
   r_rule: z.string().optional().describe("Recurrence rule"),

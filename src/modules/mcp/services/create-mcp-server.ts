@@ -266,16 +266,13 @@ async function safeAudit(
 /**
  * Convert a Zod schema to JSON Schema for the MCP protocol.
  */
+import { zodToJsonSchema as zodToJsonSchemaLib } from "zod-to-json-schema";
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function zodToJsonSchema(schema: import("zod").ZodSchema): Record<string, unknown> {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    if (typeof (schema as any).toJSONSchema === "function") {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (schema as any).toJSONSchema() as Record<string, unknown>;
-    }
+    return zodToJsonSchemaLib(schema) as Record<string, unknown>;
   } catch {
-    // Fall through to default
+    return { type: "object" };
   }
-  return { type: "object" };
 }
