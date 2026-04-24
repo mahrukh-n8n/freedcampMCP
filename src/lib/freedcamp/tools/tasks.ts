@@ -11,7 +11,7 @@ import { z } from "zod";
 import type { McpToolResult } from "../../../modules/mcp/types";
 import { dataResult, errorResult } from "../../../modules/mcp/utils/serialize";
 import type { FreedcampApiClient } from "../api-client";
-import { STATUS_MAP, STATUS_CODE_MAP, resolveStatus, resolveProjectId } from "../utils/name-resolver";
+import { STATUS_MAP, STATUS_CODE_MAP, resolveStatus, resolveProjectId, resolveUserId } from "../utils/name-resolver";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -21,20 +21,34 @@ function buildTaskUrl(projectId: number | string, taskId: number | string): stri
   return `${FREEDCAMP_BASE_URL}/project/${projectId}/task/${taskId}`;
 }
 
+/** Resolve an array of user identifiers (IDs, emails, or names) to numeric IDs. */
+async function resolveUserIds(
+  client: FreedcampApiClient,
+  ids: (number | string)[]
+): Promise<number[]> {
+  const resolved: number[] = [];
+  for (const id of ids) {
+    const r = await resolveUserId(client, id);
+    if (r) resolved.push(r.id);
+    else resolved.push(typeof id === "number" ? id : Number(id));
+  }
+  return resolved;
+}
+
 // ── list_tasks ────────────────────────────────────────────────────────────────
 
 export const listTasksSchema = z.object({
   project_id: z.union([z.number().int(), z.string()]).describe("Project ID or name (required)"),
   task_group_id: z.number().int().optional().describe("Task group ID to filter by"),
   milestone_id: z.number().int().optional().describe("Milestone ID to filter by"),
-  assigned_to_id: z.union([z.number().int(), z.array(z.number().int())]).optional()
+  assigned_to_id: z.union([z.number().int(), z.string(), z.array(z.union([z.number().int(), z.string()]))]).optional()
     .transform((v) => (Array.isArray(v) ? v : v !== undefined ? [v] : undefined))
-    .describe("User ID(s) to filter by assigned user"),
+    .describe("User ID(s), email(s), or name(s) to filter by assigned user"),
   status: z.union([z.number().int(), z.string(), z.array(z.union([z.number().int(), z.string()]))]).optional()
     .describe("Status filter: 0=not started, 1=in progress, 2=completed; string labels accepted"),
-  created_by_id: z.union([z.number().int(), z.array(z.number().int())]).optional()
+  created_by_id: z.union([z.number().int(), z.string(), z.array(z.union([z.number().int(), z.string()]))]).optional()
     .transform((v) => (Array.isArray(v) ? v : v !== undefined ? [v] : undefined))
-    .describe("User ID(s) who created the task"),
+    .describe("User ID(s), email(s), or name(s) who created the task"),
   search: z.string().optional().describe("Search string to filter tasks by title"),
   due_date_from: z.string().optional().describe("Filter tasks due on or after this date (YYYY-MM-DD)"),
   due_date_to: z.string().optional().describe("Filter tasks due on or before this date (YYYY-MM-DD)"),
@@ -76,9 +90,9 @@ export function createListTasksHandler(client: FreedcampApiClient) {
     if (input.task_group_id !== undefined) params.task_group_id = input.task_group_id;
     if (input.milestone_id !== undefined) params.milestone_id = input.milestone_id;
 
-    // assigned_to_id → multi-value array
+    // assigned_to_id → resolve names/emails to IDs, encoded as multi-value array
     if (input.assigned_to_id !== undefined) {
-      params.assigned_to_id = input.assigned_to_id;
+      params.assigned_to_id = await resolveUserIds(client, input.assigned_to_id);
     }
 
     // status → map string labels to numeric, encoded as multi-value
@@ -87,7 +101,9 @@ export function createListTasksHandler(client: FreedcampApiClient) {
       params.status = statusCodes;
     }
 
-    if (input.created_by_id !== undefined) params.created_by_id = input.created_by_id;
+    if (input.created_by_id !== undefined) {
+      params.created_by_id = await resolveUserIds(client, input.created_by_id);
+    }
     if (input.search !== undefined) params.search = input.search;
 
     if (input.due_date_from !== undefined) params.due_date_from = input.due_date_from;
@@ -115,7 +131,9 @@ export function createListTasksHandler(client: FreedcampApiClient) {
     });
 
     // Inject task_url into each task in the list (TASK-10)
-    if (result.ok && result.kind === "data") {
+    // Only inject if no field filter or if task_url is explicitly in the filter
+    const wantsTaskUrl = !input.fields || input.fields.split(",").map(f => f.trim()).some(f => f === "task_url");
+    if (result.ok && result.kind === "data" && wantsTaskUrl) {
       const payload = result.payload as Record<string, unknown>;
       if (Array.isArray(payload.data)) {
         for (const task of payload.data as Record<string, unknown>[]) {
@@ -170,8 +188,9 @@ export function createGetTaskHandler(client: FreedcampApiClient) {
       fields: input.fields,
     });
 
-    // Inject task_url (TASK-10)
-    if (result.ok && result.kind === "data") {
+    // Inject task_url (TASK-10) — respect field limiting
+    const wantsTaskUrl = !input.fields || input.fields.split(",").map(f => f.trim()).some(f => f === "task_url");
+    if (result.ok && result.kind === "data" && wantsTaskUrl) {
       const payload = result.payload as Record<string, unknown>;
       if (payload.data && typeof payload.data === "object" && !Array.isArray(payload.data)) {
         const task = payload.data as Record<string, unknown>;
@@ -205,9 +224,9 @@ export const createTaskSchema = z.object({
   task_group_id: z.number().int().optional().describe("Task group ID"),
   description: z.string().optional().describe("Task description"),
   priority: z.number().int().min(0).max(3).optional().describe("Priority: 0=None, 1=Low, 2=Medium, 3=High"),
-  assigned_to_id: z.union([z.number().int(), z.array(z.number().int())]).optional()
+  assigned_to_id: z.union([z.number().int(), z.string(), z.array(z.union([z.number().int(), z.string()]))]).optional()
     .transform((v) => (Array.isArray(v) ? v : v !== undefined ? [v] : undefined))
-    .describe("User ID(s) to assign"),
+    .describe("User ID(s), email(s), or name(s) to assign"),
   status: z.union([z.number().int(), z.string()]).optional()
     .describe("Status: 0=not started, 1=in progress, 2=completed, or string label"),
   start_date: z.string().optional().describe("Start date (YYYY-MM-DD)"),
@@ -216,6 +235,9 @@ export const createTaskSchema = z.object({
   h_parent_id: z.number().int().optional().describe("Parent task ID for subtask"),
   cf_tpl_id: z.number().int().optional().describe("Custom field template ID"),
   custom_fields: z.record(z.unknown()).optional().describe("Custom field values as key-value pairs"),
+  attached_ids: z.union([z.number().int(), z.array(z.number().int())]).optional()
+    .transform((v) => (Array.isArray(v) ? v : v !== undefined ? [v] : undefined))
+    .describe("File attachment IDs to attach to this task"),
 });
 
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
@@ -237,7 +259,7 @@ export function createCreateTaskHandler(client: FreedcampApiClient) {
     if (input.task_group_id !== undefined) body.task_group_id = input.task_group_id;
     if (input.description !== undefined) body.description = input.description;
     if (input.priority !== undefined) body.priority = input.priority;
-    if (input.assigned_to_id !== undefined) body.assigned_to_id = input.assigned_to_id;
+    if (input.assigned_to_id !== undefined) body.assigned_to_id = await resolveUserIds(client, input.assigned_to_id);
     if (input.status !== undefined) body.status = toStatusCode(input.status);
     if (input.start_date !== undefined) body.start_date = input.start_date;
     if (input.due_date !== undefined) body.due_date = input.due_date;
@@ -245,6 +267,7 @@ export function createCreateTaskHandler(client: FreedcampApiClient) {
     if (input.h_parent_id !== undefined) body.h_parent_id = input.h_parent_id;
     if (input.cf_tpl_id !== undefined) body.cf_tpl_id = input.cf_tpl_id;
     if (input.custom_fields !== undefined) body.custom_fields = input.custom_fields;
+    if (input.attached_ids !== undefined) body.attached_ids = input.attached_ids;
 
     return client.request("/tasks", {
       method: "POST",
@@ -262,9 +285,9 @@ export const updateTaskSchema = z.object({
   task_group_id: z.number().int().optional().describe("Move to this task group"),
   description: z.string().optional().describe("New description"),
   priority: z.number().int().min(0).max(3).optional().describe("Priority: 0=None, 1=Low, 2=Medium, 3=High"),
-  assigned_to_id: z.union([z.number().int(), z.array(z.number().int())]).optional()
+  assigned_to_id: z.union([z.number().int(), z.string(), z.array(z.union([z.number().int(), z.string()]))]).optional()
     .transform((v) => (Array.isArray(v) ? v : v !== undefined ? [v] : undefined))
-    .describe("User ID(s) to assign"),
+    .describe("User ID(s), email(s), or name(s) to assign"),
   status: z.union([z.number().int(), z.string()]).optional()
     .describe("Status: 0/1/2 or string label"),
   start_date: z.string().optional().describe("Start date (YYYY-MM-DD)"),
@@ -273,6 +296,9 @@ export const updateTaskSchema = z.object({
   h_parent_id: z.number().int().optional().describe("Parent task ID for subtask"),
   cf_tpl_id: z.number().int().optional().describe("Custom field template ID"),
   custom_fields: z.record(z.unknown()).optional().describe("Custom field values"),
+  attached_ids: z.union([z.number().int(), z.array(z.number().int())]).optional()
+    .transform((v) => (Array.isArray(v) ? v : v !== undefined ? [v] : undefined))
+    .describe("File attachment IDs to attach to this task"),
 });
 
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
@@ -294,7 +320,7 @@ export function createUpdateTaskHandler(client: FreedcampApiClient) {
     if (input.task_group_id !== undefined) body.task_group_id = input.task_group_id;
     if (input.description !== undefined) body.description = input.description;
     if (input.priority !== undefined) body.priority = input.priority;
-    if (input.assigned_to_id !== undefined) body.assigned_to_id = input.assigned_to_id;
+    if (input.assigned_to_id !== undefined) body.assigned_to_id = await resolveUserIds(client, input.assigned_to_id);
     if (input.status !== undefined) body.status = toStatusCode(input.status);
     if (input.start_date !== undefined) body.start_date = input.start_date;
     if (input.due_date !== undefined) body.due_date = input.due_date;
@@ -302,6 +328,7 @@ export function createUpdateTaskHandler(client: FreedcampApiClient) {
     if (input.h_parent_id !== undefined) body.h_parent_id = input.h_parent_id;
     if (input.cf_tpl_id !== undefined) body.cf_tpl_id = input.cf_tpl_id;
     if (input.custom_fields !== undefined) body.custom_fields = input.custom_fields;
+    if (input.attached_ids !== undefined) body.attached_ids = input.attached_ids;
 
     return client.request(`/tasks/${input.task_id}`, {
       method: "PUT",
@@ -340,9 +367,9 @@ export function createDeleteTaskHandler(client: FreedcampApiClient) {
 export const assignTaskSchema = z.object({
   project_id: z.union([z.number().int(), z.string()]).describe("Project ID or name the task belongs to"),
   task_id: z.number().int().describe("Task ID to assign"),
-  user_id: z.union([z.number().int(), z.array(z.number().int())]).optional()
+  user_id: z.union([z.number().int(), z.string(), z.array(z.union([z.number().int(), z.string()]))]).optional()
     .transform((v) => (Array.isArray(v) ? v : v !== undefined ? [v] : undefined))
-    .describe("User ID(s) to assign to this task"),
+    .describe("User ID(s), email(s), or name(s) to assign to this task"),
 });
 
 export type AssignTaskInput = z.infer<typeof assignTaskSchema>;
@@ -360,7 +387,7 @@ export function createAssignTaskHandler(client: FreedcampApiClient) {
       project_id: resolved.id,
     };
     if (input.user_id !== undefined) {
-      body.user_id = input.user_id;
+      body.user_id = await resolveUserIds(client, input.user_id);
     }
 
     return client.request(`/tasks/${input.task_id}/assign`, {

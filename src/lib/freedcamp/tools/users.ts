@@ -97,6 +97,8 @@ export const createUserSchema = z.object({
   project_id: z.union([z.number().int(), z.string()]).optional().describe("Project ID or name to add user to"),
   group_id: z.number().int().optional().describe("Group ID within the project"),
   f_is_admin: z.number().int().min(0).max(1).optional().describe("Make user an admin (1=yes)"),
+  oauth_provider: z.string().optional().describe("OAuth provider name (e.g. google, github)"),
+  oauth_access_token: z.string().optional().describe("OAuth access token for provider"),
 });
 
 export type CreateUserInput = z.infer<typeof createUserSchema>;
@@ -121,6 +123,8 @@ export function createCreateUserHandler(client: FreedcampApiClient) {
     }
     if (input.group_id !== undefined) body.group_id = input.group_id;
     if (input.f_is_admin !== undefined) body.f_is_admin = input.f_is_admin;
+    if (input.oauth_provider !== undefined) body.oauth_provider = input.oauth_provider;
+    if (input.oauth_access_token !== undefined) body.oauth_access_token = input.oauth_access_token;
 
     return client.request("/users", {
       method: "POST",
@@ -132,7 +136,7 @@ export function createCreateUserHandler(client: FreedcampApiClient) {
 // ── update_current_user ──────────────────────────────────────────────────────
 
 export const updateCurrentUserSchema = z.object({
-  first_name: z.string().min(1).optional().describe("New first name"),
+  first_name: z.string().min(1).describe("New first name (required)"),
   email: z.string().email().optional().describe("New email address"),
   password: z.string().min(6).optional().describe("New password"),
   confirmation_password: z.string().optional().describe("Current password confirmation (required if changing password)"),
