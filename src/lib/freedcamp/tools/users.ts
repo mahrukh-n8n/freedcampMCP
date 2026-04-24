@@ -9,11 +9,12 @@
 import { z } from "zod";
 import type { McpToolResult } from "../../../modules/mcp/types";
 import type { FreedcampApiClient } from "../api-client";
+import { resolveUserId, resolveProjectId } from "../utils/name-resolver";
 
 // ── list_users ──────────────────────────────────────────────────────────────
 
 export const listUsersSchema = z.object({
-  project_id: z.number().int().optional().describe("Filter users by project ID"),
+  project_id: z.union([z.number().int(), z.string()]).optional().describe("Filter users by project ID or name"),
   fields: z.string().optional().describe("Comma-separated dot-notation fields to include"),
   limit: z.number().int().min(1).max(100).optional().describe("Number of results per page"),
   offset: z.number().int().min(0).optional().describe("Offset for pagination"),
@@ -26,7 +27,11 @@ export function createListUsersHandler(client: FreedcampApiClient) {
     const input = rawInput as ListUsersInput;
     const params: Record<string, unknown> = {};
     if (input.project_id !== undefined) {
-      params.project_id = input.project_id;
+      const resolved = await resolveProjectId(client, input.project_id);
+      if (!resolved) {
+        return { ok: false, kind: "data", error: `Project not found: "${input.project_id}"`, errorCode: "NOT_FOUND" as const };
+      }
+      params.project_id = resolved.id;
     }
 
     return client.request("/users", {
@@ -50,7 +55,14 @@ export type GetUserInput = z.infer<typeof getUserSchema>;
 export function createGetUserHandler(client: FreedcampApiClient) {
   return async (_ctx: unknown, rawInput: unknown): Promise<McpToolResult> => {
     const input = rawInput as GetUserInput;
-    return client.request(`/users/${input.user_id}`, {
+
+    // Resolve user name/email to ID if needed
+    const resolved = await resolveUserId(client, input.user_id);
+    if (!resolved) {
+      return { ok: false, kind: "data", error: `User not found: "${input.user_id}"`, errorCode: "NOT_FOUND" as const };
+    }
+
+    return client.request(`/users/${resolved.id}`, {
       method: "GET",
       fields: input.fields,
     });
@@ -82,7 +94,7 @@ export const createUserSchema = z.object({
   password: z.string().min(6).describe("Password (required, min 6 chars)"),
   first_name: z.string().min(1).describe("First name (required)"),
   last_name: z.string().optional().describe("Last name"),
-  project_id: z.number().int().optional().describe("Project ID to add user to"),
+  project_id: z.union([z.number().int(), z.string()]).optional().describe("Project ID or name to add user to"),
   group_id: z.number().int().optional().describe("Group ID within the project"),
   f_is_admin: z.number().int().min(0).max(1).optional().describe("Make user an admin (1=yes)"),
 });
@@ -100,7 +112,13 @@ export function createCreateUserHandler(client: FreedcampApiClient) {
     };
 
     if (input.last_name !== undefined) body.last_name = input.last_name;
-    if (input.project_id !== undefined) body.project_id = input.project_id;
+    if (input.project_id !== undefined) {
+      const resolved = await resolveProjectId(client, input.project_id);
+      if (!resolved) {
+        return { ok: false, kind: "data", error: `Project not found: "${input.project_id}"`, errorCode: "NOT_FOUND" as const };
+      }
+      body.project_id = resolved.id;
+    }
     if (input.group_id !== undefined) body.group_id = input.group_id;
     if (input.f_is_admin !== undefined) body.f_is_admin = input.f_is_admin;
 

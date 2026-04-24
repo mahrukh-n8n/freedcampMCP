@@ -11,6 +11,7 @@ import { z } from "zod";
 import type { McpToolResult } from "../../../modules/mcp/types";
 import { dataResult, errorResult } from "../../../modules/mcp/utils/serialize";
 import type { FreedcampApiClient } from "../api-client";
+import { STATUS_MAP, STATUS_CODE_MAP, resolveStatus, resolveProjectId } from "../utils/name-resolver";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -23,7 +24,7 @@ function buildTaskUrl(projectId: number | string, taskId: number | string): stri
 // ── list_tasks ────────────────────────────────────────────────────────────────
 
 export const listTasksSchema = z.object({
-  project_id: z.number().int().describe("Project ID (required)"),
+  project_id: z.union([z.number().int(), z.string()]).describe("Project ID or name (required)"),
   task_group_id: z.number().int().optional().describe("Task group ID to filter by"),
   milestone_id: z.number().int().optional().describe("Milestone ID to filter by"),
   assigned_to_id: z.union([z.number().int(), z.array(z.number().int())]).optional()
@@ -50,32 +51,26 @@ export const listTasksSchema = z.object({
 
 export type ListTasksInput = z.infer<typeof listTasksSchema>;
 
-/** Map string status labels to numeric codes */
+/** Map string status labels to numeric codes using centralized resolveStatus */
 function mapStatusStatus(status: z.infer<typeof listTasksSchema>["status"]): number[] | undefined {
   if (status === undefined) return undefined;
 
-  const labelMap: Record<string, number> = {
-    "not started": 0,
-    "in progress": 1,
-    completed: 2,
-  };
-
   const values = Array.isArray(status) ? status : [status];
-
-  return values.map((v) => {
-    if (typeof v === "number") return v;
-    const lower = v.toLowerCase();
-    if (lower in labelMap) return labelMap[lower];
-    return parseInt(v, 10);
-  });
+  return values.map((v) => resolveStatus(v));
 }
 
 export function createListTasksHandler(client: FreedcampApiClient) {
   return async (_ctx: unknown, rawInput: unknown): Promise<McpToolResult> => {
     const input = rawInput as ListTasksInput;
 
+    // Resolve project name to ID if needed
+    const resolved = await resolveProjectId(client, input.project_id);
+    if (!resolved) {
+      return { ok: false, kind: "data", error: `Project not found: "${input.project_id}"`, errorCode: "NOT_FOUND" as const };
+    }
+
     const params: Record<string, unknown> = {
-      project_id: input.project_id,
+      project_id: resolved.id,
     };
 
     if (input.task_group_id !== undefined) params.task_group_id = input.task_group_id;
@@ -124,7 +119,7 @@ export function createListTasksHandler(client: FreedcampApiClient) {
 // ── get_task ──────────────────────────────────────────────────────────────────
 
 export const getTaskSchema = z.object({
-  project_id: z.number().int().describe("Project ID the task belongs to"),
+  project_id: z.union([z.number().int(), z.string()]).describe("Project ID or name the task belongs to"),
   task_id: z.number().int().describe("Task ID to look up"),
   f_include_tr_data: z.number().int().min(0).max(1).optional().default(1)
     .describe("Include tag detail (id, title, owner_id, usages_count) — default 1"),
@@ -140,8 +135,14 @@ export function createGetTaskHandler(client: FreedcampApiClient) {
   return async (_ctx: unknown, rawInput: unknown): Promise<McpToolResult> => {
     const input = rawInput as GetTaskInput;
 
+    // Resolve project name to ID if needed
+    const resolved = await resolveProjectId(client, input.project_id);
+    if (!resolved) {
+      return { ok: false, kind: "data", error: `Project not found: "${input.project_id}"`, errorCode: "NOT_FOUND" as const };
+    }
+
     const params: Record<string, unknown> = {
-      project_id: input.project_id,
+      project_id: resolved.id,
     };
     params.f_include_tr_data = input.f_include_tr_data ?? 1;
     params.f_include_tags = input.f_include_tags ?? 1;
@@ -158,10 +159,10 @@ export function createGetTaskHandler(client: FreedcampApiClient) {
       const payload = result.payload as Record<string, unknown>;
       if (payload.data && typeof payload.data === "object" && !Array.isArray(payload.data)) {
         const task = payload.data as Record<string, unknown>;
-        task.task_url = buildTaskUrl(input.project_id, input.task_id);
+        task.task_url = buildTaskUrl(resolved.id, input.task_id);
       } else if (Array.isArray(payload.data)) {
         for (const task of payload.data as Record<string, unknown>[]) {
-          task.task_url = buildTaskUrl(input.project_id, input.task_id);
+          task.task_url = buildTaskUrl(resolved.id, input.task_id);
         }
       }
     }
@@ -170,34 +171,20 @@ export function createGetTaskHandler(client: FreedcampApiClient) {
   };
 }
 
-// ── Status bidirectional mapping (TASK-08) ────────────────────────────────
-
-const STATUS_LABEL_TO_CODE: Record<string, number> = {
-  "not started": 0,
-  "in progress": 1,
-  completed: 2,
-};
-
-const STATUS_CODE_TO_LABEL: Record<number, string> = {
-  0: "not started",
-  1: "in progress",
-  2: "completed",
-};
+// ── Status mapping — centralized in name-resolver.ts (TASK-08) ──────────────
 
 /** Accept both string labels and numeric codes, always output numeric code for API. */
 function toStatusCode(status: string | number): number {
-  if (typeof status === "number") return status;
-  const lower = status.toLowerCase();
-  if (lower in STATUS_LABEL_TO_CODE) return STATUS_LABEL_TO_CODE[lower];
-  const parsed = parseInt(status, 10);
-  if (!isNaN(parsed)) return parsed;
-  throw new Error(`Invalid task status: "${status}". Use 0/1/2 or "not started"/"in progress"/"completed"`);
+  return resolveStatus(status);
 }
+
+const STATUS_LABEL_TO_CODE = STATUS_MAP;
+const STATUS_CODE_TO_LABEL = STATUS_CODE_MAP;
 
 // ── create_task ──────────────────────────────────────────────────────────────
 
 export const createTaskSchema = z.object({
-  project_id: z.number().int().describe("Project ID (required)"),
+  project_id: z.union([z.number().int(), z.string()]).describe("Project ID or name (required)"),
   title: z.string().min(1).describe("Task title (required)"),
   task_group_id: z.number().int().optional().describe("Task group ID"),
   description: z.string().optional().describe("Task description"),
@@ -221,8 +208,13 @@ export function createCreateTaskHandler(client: FreedcampApiClient) {
   return async (_ctx: unknown, rawInput: unknown): Promise<McpToolResult> => {
     const input = rawInput as CreateTaskInput;
 
+    const resolved = await resolveProjectId(client, input.project_id);
+    if (!resolved) {
+      return { ok: false, kind: "data", error: `Project not found: "${input.project_id}"`, errorCode: "NOT_FOUND" as const };
+    }
+
     const body: Record<string, unknown> = {
-      project_id: input.project_id,
+      project_id: resolved.id,
       title: input.title,
     };
 
@@ -248,7 +240,7 @@ export function createCreateTaskHandler(client: FreedcampApiClient) {
 // ── update_task ──────────────────────────────────────────────────────────────
 
 export const updateTaskSchema = z.object({
-  project_id: z.number().int().describe("Project ID (required)"),
+  project_id: z.union([z.number().int(), z.string()]).describe("Project ID or name (required)"),
   task_id: z.number().int().describe("Task ID to update (required)"),
   title: z.string().min(1).optional().describe("New task title"),
   task_group_id: z.number().int().optional().describe("Move to this task group"),
@@ -273,8 +265,13 @@ export function createUpdateTaskHandler(client: FreedcampApiClient) {
   return async (_ctx: unknown, rawInput: unknown): Promise<McpToolResult> => {
     const input = rawInput as UpdateTaskInput;
 
+    const resolved = await resolveProjectId(client, input.project_id);
+    if (!resolved) {
+      return { ok: false, kind: "data", error: `Project not found: "${input.project_id}"`, errorCode: "NOT_FOUND" as const };
+    }
+
     const body: Record<string, unknown> = {
-      project_id: input.project_id,
+      project_id: resolved.id,
     };
 
     if (input.title !== undefined) body.title = input.title;
@@ -300,7 +297,7 @@ export function createUpdateTaskHandler(client: FreedcampApiClient) {
 // ── delete_task ──────────────────────────────────────────────────────────────
 
 export const deleteTaskSchema = z.object({
-  project_id: z.number().int().describe("Project ID the task belongs to"),
+  project_id: z.union([z.number().int(), z.string()]).describe("Project ID or name the task belongs to"),
   task_id: z.number().int().describe("Task ID to delete"),
 });
 
@@ -309,9 +306,15 @@ export type DeleteTaskInput = z.infer<typeof deleteTaskSchema>;
 export function createDeleteTaskHandler(client: FreedcampApiClient) {
   return async (_ctx: unknown, rawInput: unknown): Promise<McpToolResult> => {
     const input = rawInput as DeleteTaskInput;
+
+    const resolved = await resolveProjectId(client, input.project_id);
+    if (!resolved) {
+      return { ok: false, kind: "data", error: `Project not found: "${input.project_id}"`, errorCode: "NOT_FOUND" as const };
+    }
+
     return client.request(`/tasks/${input.task_id}`, {
       method: "DELETE",
-      params: { project_id: input.project_id },
+      params: { project_id: resolved.id },
     });
   };
 }
@@ -319,7 +322,7 @@ export function createDeleteTaskHandler(client: FreedcampApiClient) {
 // ── assign_task ──────────────────────────────────────────────────────────────
 
 export const assignTaskSchema = z.object({
-  project_id: z.number().int().describe("Project ID the task belongs to"),
+  project_id: z.union([z.number().int(), z.string()]).describe("Project ID or name the task belongs to"),
   task_id: z.number().int().describe("Task ID to assign"),
   user_id: z.union([z.number().int(), z.array(z.number().int())]).optional()
     .transform((v) => (Array.isArray(v) ? v : v !== undefined ? [v] : undefined))
@@ -332,8 +335,13 @@ export function createAssignTaskHandler(client: FreedcampApiClient) {
   return async (_ctx: unknown, rawInput: unknown): Promise<McpToolResult> => {
     const input = rawInput as AssignTaskInput;
 
+    const resolved = await resolveProjectId(client, input.project_id);
+    if (!resolved) {
+      return { ok: false, kind: "data", error: `Project not found: "${input.project_id}"`, errorCode: "NOT_FOUND" as const };
+    }
+
     const body: Record<string, unknown> = {
-      project_id: input.project_id,
+      project_id: resolved.id,
     };
     if (input.user_id !== undefined) {
       body.user_id = input.user_id;

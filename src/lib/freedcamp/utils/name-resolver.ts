@@ -7,21 +7,26 @@
  *
  * Resolution strategy:
  * 1. If input is a number or numeric string → use as ID directly
- * 2. If input is a non-numeric string → query API, find matching name/email
- * 3. Return first exact match; fall back to first partial match
+ * 2. Check cache for previous resolution
+ * 3. If not cached, query API, find matching name/email
+ * 4. Cache the result, return first exact match; fall back to partial match
  */
 
 import type { FreedcampApiClient } from "../api-client";
+import { ResolutionCache } from "./resolution-cache";
 
 export interface ResolvedId {
   id: number;
   name: string;
-  resolvedFrom: "id" | "exact" | "partial";
+  resolvedFrom: "id" | "exact" | "partial" | "cache";
 }
+
+/** Shared cache instance for name resolution. */
+const cache = new ResolutionCache();
 
 /**
  * Resolve a project identifier (ID or name) to a project ID.
- * Queries GET /projects if the input is not numeric.
+ * Queries GET /projects if the input is not numeric. Results are cached.
  */
 export async function resolveProjectId(
   client: FreedcampApiClient,
@@ -34,6 +39,13 @@ export async function resolveProjectId(
   const numericId = parseInt(input, 10);
   if (!isNaN(numericId) && String(numericId) === input.trim()) {
     return { id: numericId, name: input, resolvedFrom: "id" };
+  }
+
+  // Check cache
+  const cacheKey = ResolutionCache.projectKey(input);
+  const cached = cache.get<ResolvedId>(cacheKey);
+  if (cached) {
+    return { ...cached, resolvedFrom: "cache" };
   }
 
   // Name lookup — query projects
@@ -57,8 +69,14 @@ export async function resolveProjectId(
     return name === searchName;
   });
   if (exact) {
-    const id = Number(exact.project_id ?? exact.id ?? 0);
-    return { id, name: String(exact.project_name ?? exact.name ?? ""), resolvedFrom: "exact" };
+    const resolved: ResolvedId = {
+      id: Number(exact.project_id ?? exact.id ?? 0),
+      name: String(exact.project_name ?? exact.name ?? ""),
+      resolvedFrom: "exact",
+    };
+    cache.set(cacheKey, resolved);
+    cache.set(ResolutionCache.projectIdKey(resolved.id), resolved);
+    return resolved;
   }
 
   // Partial match
@@ -67,8 +85,14 @@ export async function resolveProjectId(
     return name.includes(searchName);
   });
   if (partial) {
-    const id = Number(partial.project_id ?? partial.id ?? 0);
-    return { id, name: String(partial.project_name ?? partial.name ?? ""), resolvedFrom: "partial" };
+    const resolved: ResolvedId = {
+      id: Number(partial.project_id ?? partial.id ?? 0),
+      name: String(partial.project_name ?? partial.name ?? ""),
+      resolvedFrom: "partial",
+    };
+    cache.set(cacheKey, resolved);
+    cache.set(ResolutionCache.projectIdKey(resolved.id), resolved);
+    return resolved;
   }
 
   return null;
@@ -76,7 +100,7 @@ export async function resolveProjectId(
 
 /**
  * Resolve a user identifier (ID, email, or name) to a user ID.
- * Queries GET /users if the input is not numeric.
+ * Queries GET /users if the input is not numeric. Results are cached.
  */
 export async function resolveUserId(
   client: FreedcampApiClient,
@@ -89,6 +113,13 @@ export async function resolveUserId(
   const numericId = parseInt(input, 10);
   if (!isNaN(numericId) && String(numericId) === input.trim()) {
     return { id: numericId, name: input, resolvedFrom: "id" };
+  }
+
+  // Check cache
+  const cacheKey = ResolutionCache.userKey(input);
+  const cached = cache.get<ResolvedId>(cacheKey);
+  if (cached) {
+    return { ...cached, resolvedFrom: "cache" };
   }
 
   // Name/email lookup — query users
@@ -112,8 +143,14 @@ export async function resolveUserId(
     return email === searchTerm;
   });
   if (exactEmail) {
-    const id = Number(exactEmail.id ?? 0);
-    return { id, name: String(exactEmail.first_name ?? exactEmail.username ?? ""), resolvedFrom: "exact" };
+    const resolved: ResolvedId = {
+      id: Number(exactEmail.id ?? 0),
+      name: String(exactEmail.first_name ?? exactEmail.username ?? ""),
+      resolvedFrom: "exact",
+    };
+    cache.set(cacheKey, resolved);
+    cache.set(ResolutionCache.userIdKey(resolved.id), resolved);
+    return resolved;
   }
 
   // Exact name match
@@ -123,8 +160,14 @@ export async function resolveUserId(
     return fullName === searchTerm || username === searchTerm;
   });
   if (exactName) {
-    const id = Number(exactName.id ?? 0);
-    return { id, name: String(exactName.first_name ?? exactName.username ?? ""), resolvedFrom: "exact" };
+    const resolved: ResolvedId = {
+      id: Number(exactName.id ?? 0),
+      name: String(exactName.first_name ?? exactName.username ?? ""),
+      resolvedFrom: "exact",
+    };
+    cache.set(cacheKey, resolved);
+    cache.set(ResolutionCache.userIdKey(resolved.id), resolved);
+    return resolved;
   }
 
   // Partial match (name or email)
@@ -134,8 +177,14 @@ export async function resolveUserId(
     return fullName.includes(searchTerm) || email.includes(searchTerm);
   });
   if (partial) {
-    const id = Number(partial.id ?? 0);
-    return { id, name: String(partial.first_name ?? partial.username ?? ""), resolvedFrom: "partial" };
+    const resolved: ResolvedId = {
+      id: Number(partial.id ?? 0),
+      name: String(partial.first_name ?? partial.username ?? ""),
+      resolvedFrom: "partial",
+    };
+    cache.set(cacheKey, resolved);
+    cache.set(ResolutionCache.userIdKey(resolved.id), resolved);
+    return resolved;
   }
 
   return null;
@@ -143,7 +192,7 @@ export async function resolveUserId(
 
 /**
  * Status name → code bidirectional mapping.
- * Already defined in tasks.ts but centralized here for reuse.
+ * Centralized here for reuse across all tools.
  */
 export const STATUS_MAP: Record<string, number> = {
   "not started": 0,

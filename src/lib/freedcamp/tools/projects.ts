@@ -5,6 +5,7 @@
 import { z } from "zod";
 import type { McpToolResult } from "../../../modules/mcp/types";
 import type { FreedcampApiClient } from "../api-client";
+import { resolveProjectId } from "../utils/name-resolver";
 
 // ── list_projects ───────────────────────────────────────────────────────────
 
@@ -56,12 +57,19 @@ export type GetProjectInput = z.infer<typeof getProjectSchema>;
 export function createGetProjectHandler(client: FreedcampApiClient) {
   return async (_ctx: unknown, rawInput: unknown): Promise<McpToolResult> => {
     const input = rawInput as GetProjectInput;
+
+    // Resolve project name to ID if needed
+    const resolved = await resolveProjectId(client, input.project_id);
+    if (!resolved) {
+      return { ok: false, kind: "data", error: `Project not found: "${input.project_id}"`, errorCode: "NOT_FOUND" as const };
+    }
+
     const params: Record<string, unknown> = {};
     if (input.f_for_overview_app !== undefined) {
       params.f_for_overview_app = input.f_for_overview_app;
     }
 
-    return client.request(`/projects/${input.project_id}`, {
+    return client.request(`/projects/${resolved.id}`, {
       method: "GET",
       params,
       fields: input.fields,
@@ -121,6 +129,12 @@ export function createUpdateProjectHandler(client: FreedcampApiClient) {
   return async (_ctx: unknown, rawInput: unknown): Promise<McpToolResult> => {
     const input = rawInput as UpdateProjectInput;
 
+    // Resolve project name to ID if needed
+    const resolved = await resolveProjectId(client, input.project_id);
+    if (!resolved) {
+      return { ok: false, kind: "data", error: `Project not found: "${input.project_id}"`, errorCode: "NOT_FOUND" as const };
+    }
+
     const body: Record<string, unknown> = {};
 
     if (input.project_name !== undefined) body.project_name = input.project_name;
@@ -130,7 +144,7 @@ export function createUpdateProjectHandler(client: FreedcampApiClient) {
     if (input.group_id !== undefined) body.group_id = input.group_id;
     if (input.group_name !== undefined) body.group_name = input.group_name;
 
-    return client.request(`/projects/${input.project_id}`, {
+    return client.request(`/projects/${resolved.id}`, {
       method: "PUT",
       body,
     });

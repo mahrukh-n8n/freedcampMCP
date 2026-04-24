@@ -12,15 +12,10 @@
  */
 
 import { buildAuthParams, type AuthParams } from "./auth/hmac";
-import { applyFieldLimiting } from "./utils/field-limiter";
+import { filterResponse } from "./utils/response-filter";
 import { logger } from "./utils/logger";
 import type { McpToolResult } from "../../modules/mcp/types";
 import { dataResult, errorResult } from "../../modules/mcp/utils/serialize";
-
-// Node fetch doesn't need an explicit agent, but we configure
-// keep-alive and connection pooling via the fetch dispatcher.
-// For Node 18+, the default undici dispatcher supports keep-alive.
-const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT_REQUESTS ?? "", 10) || 6;
 
 export type FreedcampClientConfig = {
   apiKey: string;
@@ -192,16 +187,12 @@ export class FreedcampApiClient {
 
       const json = await response.json() as FreedcampResponse<T>;
 
-      let payload: unknown = json.data ?? json;
-
-      // Apply field limiting if requested
-      if (fields) {
-        payload = applyFieldLimiting(payload, fields);
-      }
+      // Apply response filter: strip internal fields, apply field limiting
+      const filtered = filterResponse(json, fields);
 
       return dataResult({
-        data: payload,
-        meta: json.meta ?? {},
+        data: filtered?.data ?? json,
+        meta: filtered?.meta ?? json.meta ?? {},
         ...(json.url ? { url: json.url } : {}),
       });
     } catch (err) {
