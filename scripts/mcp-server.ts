@@ -1,4 +1,6 @@
-import "dotenv/config";
+import { config as dotenvConfig } from "dotenv";
+// Only load .env as fallback — don't override env vars already set by MCP host
+dotenvConfig({ override: false });
 
 import { toolRegistry } from "../src/modules/mcp/registry/tool-registry";
 import { createMcpServer } from "../src/modules/mcp/services/create-mcp-server";
