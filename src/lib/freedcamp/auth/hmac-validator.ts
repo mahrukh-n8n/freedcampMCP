@@ -8,7 +8,7 @@ type ValidationResult =
   | { ok: true; userId: number; apiKey: string }
   | { ok: false; error: string };
 
-const FREEDCAMP_BASE_URL = "https://freedcamp.com/api/v1";
+const FREEDCAMP_BASE_URL = "https://freedcamp.com/api/v1/";
 
 /**
  * Validate API credentials by calling GET /sessions/current.
@@ -20,7 +20,10 @@ export async function validateApiKey(
   baseUrl: string = FREEDCAMP_BASE_URL
 ): Promise<ValidationResult> {
   const auth = buildAuthParams(apiKey, apiSecret);
-  const url = `${baseUrl}/sessions/current?api_key=${encodeURIComponent(auth.api_key)}&timestamp=${encodeURIComponent(auth.timestamp)}&hash=${encodeURIComponent(auth.hash)}`;
+  // Strip leading slash from endpoint to avoid double-slash with trailing-slash base URL
+  const endpoint = "sessions/current";
+  const safeBase = baseUrl.replace(/\/+$/, "");
+  const url = `${safeBase}/${endpoint}?api_key=${encodeURIComponent(auth.api_key)}&timestamp=${encodeURIComponent(auth.timestamp)}&hash=${encodeURIComponent(auth.hash)}`;
 
   try {
     const res = await fetch(url);

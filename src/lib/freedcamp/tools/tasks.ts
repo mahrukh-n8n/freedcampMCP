@@ -140,12 +140,15 @@ export function createListTasksHandler(client: FreedcampApiClient) {
     const wantsTaskUrl = !input.fields || input.fields.split(",").map(f => f.trim()).some(f => f === "task_url");
     if (result.ok && result.kind === "data" && wantsTaskUrl) {
       const payload = result.payload as Record<string, unknown>;
-      if (Array.isArray(payload.data)) {
-        for (const task of payload.data as Record<string, unknown>[]) {
-          const projectId = Number(task.project_id ?? resolved.id);
-          const taskId = Number(task.id);
-          if (taskId) {
-            task.task_url = buildTaskUrl(projectId, taskId);
+      const data = payload.data as Record<string, unknown> | unknown[];
+      // Handle both { tasks: [...] } and direct array response shapes
+      const tasks = Array.isArray(data) ? data : Array.isArray(data?.tasks) ? data.tasks as Record<string, unknown>[] : null;
+      if (tasks) {
+        for (const task of tasks) {
+          const pId = Number((task as Record<string, unknown>).project_id ?? resolved.id);
+          const tId = Number((task as Record<string, unknown>).id);
+          if (tId) {
+            (task as Record<string, unknown>).task_url = buildTaskUrl(pId, tId);
           }
         }
       }
@@ -197,13 +200,16 @@ export function createGetTaskHandler(client: FreedcampApiClient) {
     const wantsTaskUrl = !input.fields || input.fields.split(",").map(f => f.trim()).some(f => f === "task_url");
     if (result.ok && result.kind === "data" && wantsTaskUrl) {
       const payload = result.payload as Record<string, unknown>;
-      if (payload.data && typeof payload.data === "object" && !Array.isArray(payload.data)) {
-        const task = payload.data as Record<string, unknown>;
-        task.task_url = buildTaskUrl(resolved.id, input.task_id);
-      } else if (Array.isArray(payload.data)) {
-        for (const task of payload.data as Record<string, unknown>[]) {
+      const data = payload.data as Record<string, unknown> | unknown[];
+      // Handle { tasks: [...] } shape
+      const tasks = Array.isArray(data) ? data as Record<string, unknown>[] : Array.isArray(data?.tasks) ? data.tasks as Record<string, unknown>[] : null;
+      if (tasks) {
+        for (const task of tasks) {
           task.task_url = buildTaskUrl(resolved.id, input.task_id);
         }
+      } else if (data && typeof data === "object" && !Array.isArray(data)) {
+        // Single task object (rare but possible)
+        (data as Record<string, unknown>).task_url = buildTaskUrl(resolved.id, input.task_id);
       }
     }
 

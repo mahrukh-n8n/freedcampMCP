@@ -56,8 +56,14 @@ export async function resolveProjectId(
 
   if (!result.ok || result.kind !== "data") return null;
 
-  const payload = result.payload as { data?: Record<string, unknown>[] };
-  const projects = Array.isArray(payload?.data) ? payload.data : [];
+  const payload = result.payload as Record<string, unknown>;
+  // Freedcamp returns { data: { projects: [...] } } not a flat array
+  const data = payload.data as Record<string, unknown> | undefined;
+  const projects = Array.isArray(data)
+    ? data as Record<string, unknown>[]
+    : Array.isArray(data?.projects)
+      ? data.projects as Record<string, unknown>[]
+      : [];
 
   if (projects.length === 0) return null;
 
@@ -130,8 +136,14 @@ export async function resolveUserId(
 
   if (!result.ok || result.kind !== "data") return null;
 
-  const payload = result.payload as { data?: Record<string, unknown>[] };
-  const users = Array.isArray(payload?.data) ? payload.data : [];
+  const payload = result.payload as Record<string, unknown>;
+  // Freedcamp returns { data: { users: [...] } } not a flat array
+  const data = payload.data as Record<string, unknown> | undefined;
+  const users = Array.isArray(data)
+    ? data as Record<string, unknown>[]
+    : Array.isArray(data?.users)
+      ? data.users as Record<string, unknown>[]
+      : [];
 
   if (users.length === 0) return null;
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { encodeAllParams } from "../lib/freedcamp/api-client";
+import { encodeAllParams, FreedcampApiClient } from "../lib/freedcamp/api-client";
 
 describe("Multi-value param encoding", () => {
   it("encodes array values with [] suffix producing separate entries", () => {
@@ -44,5 +44,34 @@ describe("Multi-value param encoding", () => {
     expect(result.get("offset")).toBe("0");
     expect(result.get("order[priority]")).toBe("desc");
     expect(result.getAll("assigned_to_id[]")).toEqual(["1", "2"]);
+  });
+});
+
+describe("URL resolution", () => {
+  it("resolves endpoints relative to base URL with trailing slash", () => {
+    const client = new FreedcampApiClient({
+      apiKey: "test",
+      apiSecret: "test",
+      baseUrl: "https://freedcamp.com/api/v1/",
+    });
+    // Access baseUrl via instance
+    expect((client as unknown as { baseUrl: string }).baseUrl).toBe("https://freedcamp.com/api/v1/");
+  });
+
+  it("adds trailing slash to base URL when missing", () => {
+    const client = new FreedcampApiClient({
+      apiKey: "test",
+      apiSecret: "test",
+      baseUrl: "https://freedcamp.com/api/v1",
+    });
+    expect((client as unknown as { baseUrl: string }).baseUrl).toBe("https://freedcamp.com/api/v1/");
+  });
+
+  it("default base URL has trailing slash", () => {
+    const client = new FreedcampApiClient({
+      apiKey: "test",
+      apiSecret: "test",
+    });
+    expect((client as unknown as { baseUrl: string }).baseUrl).toBe("https://freedcamp.com/api/v1/");
   });
 });

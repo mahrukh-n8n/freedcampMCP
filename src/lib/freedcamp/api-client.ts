@@ -44,7 +44,7 @@ export type RequestConfig = {
   signal?: AbortSignal;
 };
 
-const DEFAULT_BASE_URL = "https://freedcamp.com/api/v1";
+const DEFAULT_BASE_URL = "https://freedcamp.com/api/v1/";
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30000;
 
@@ -67,7 +67,8 @@ export class FreedcampApiClient {
   constructor(config: FreedcampClientConfig) {
     this.apiKey = config.apiKey;
     this.apiSecret = config.apiSecret;
-    this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
+    // Ensure trailing slash so new URL() resolves correctly
+    this.baseUrl = (config.baseUrl ?? DEFAULT_BASE_URL).replace(/\/?$/, "/");
     this.maxRetries = config.maxRetries ?? DEFAULT_MAX_RETRIES;
     this.requestTimeoutMs = config.requestTimeoutMs ?? (parseInt(process.env.REQUEST_TIMEOUT_MS ?? "", 10) || DEFAULT_REQUEST_TIMEOUT_MS);
   }
@@ -82,7 +83,9 @@ export class FreedcampApiClient {
     const { method = "GET", params, body, pagination, sort, fields, signal } = config;
 
     const auth = buildAuthParams(this.apiKey, this.apiSecret);
-    const url = new URL(endpoint, this.baseUrl);
+    // Strip leading slash so URL resolves relative to base path, not origin
+    const relativeEndpoint = endpoint.replace(/^\/+/, "");
+    const url = new URL(relativeEndpoint, this.baseUrl);
 
     // Auth params always go in query string
     url.searchParams.set("api_key", auth.api_key);
