@@ -180,7 +180,7 @@ export function createUpdateProjectHandler(client: FreedcampApiClient) {
     }
 
     return client.request(`/projects/${resolved.id}`, {
-      method: "PUT",
+      method: "POST",
       body,
     });
   };

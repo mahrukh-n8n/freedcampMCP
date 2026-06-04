@@ -31,8 +31,9 @@ const APP_ID_DESCRIPTION = "App ID: tasks=2, milestones=3, discussions=5, files=
 // ── add_comment ─────────────────────────────────────────────────────────────
 
 export const addCommentSchema = z.object({
-  item_id: z.number().int().describe("ID of the item (task, milestone, etc.) to comment on"),
-  app_id: z.union([z.number().int(), z.string()]).describe(APP_ID_DESCRIPTION),
+  item_id: z.number().int().optional().describe("ID of the item (task, milestone, etc.) to comment on"),
+  task_id: z.union([z.number().int(), z.string()]).optional().describe("Task ID. Convenience alias used by the official Postman collection."),
+  app_id: z.union([z.number().int(), z.string()]).optional().describe(APP_ID_DESCRIPTION),
   description: z.string().min(1).describe("Comment text (required)"),
   attached_ids: z.union([z.number().int(), z.array(z.number().int())]).optional()
     .transform((v) => (Array.isArray(v) ? v : v !== undefined ? [v] : undefined))
@@ -44,10 +45,30 @@ export type AddCommentInput = z.infer<typeof addCommentSchema>;
 export function createAddCommentHandler(client: FreedcampApiClient) {
   return async (_ctx: unknown, rawInput: unknown): Promise<McpToolResult> => {
     const input = rawInput as AddCommentInput;
+    const itemId = input.item_id ?? (input.task_id !== undefined ? Number(input.task_id) : undefined);
+    const rawAppId = input.app_id ?? (input.task_id !== undefined ? APP_IDS.tasks : undefined);
 
-    const appId = typeof input.app_id === "string"
-      ? APP_IDS[input.app_id as AppIdName] ?? parseInt(input.app_id, 10)
-      : input.app_id;
+    if (itemId === undefined || Number.isNaN(itemId)) {
+      return {
+        ok: false,
+        kind: "data" as const,
+        error: "item_id or task_id is required",
+        errorCode: "VALIDATION_ERROR" as const,
+      };
+    }
+
+    if (rawAppId === undefined) {
+      return {
+        ok: false,
+        kind: "data" as const,
+        error: `app_id is required unless task_id is provided. Use numeric ID or one of: ${Object.keys(APP_IDS).join(", ")}`,
+        errorCode: "VALIDATION_ERROR" as const,
+      };
+    }
+
+    const appId = typeof rawAppId === "string"
+      ? APP_IDS[rawAppId as AppIdName] ?? parseInt(rawAppId, 10)
+      : rawAppId;
 
     if (isNaN(appId)) {
       return {
@@ -59,7 +80,7 @@ export function createAddCommentHandler(client: FreedcampApiClient) {
     }
 
     const body: Record<string, unknown> = {
-      item_id: input.item_id,
+      item_id: itemId,
       app_id: appId,
       description: input.description,
     };

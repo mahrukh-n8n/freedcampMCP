@@ -440,7 +440,7 @@ export function createUpdateTaskHandler(client: FreedcampApiClient) {
     if (input.attached_ids !== undefined) body.attached_ids = input.attached_ids;
 
     return client.request(`/tasks/${input.task_id}`, {
-      method: "PUT",
+      method: "POST",
       body,
     });
   };
@@ -502,6 +502,33 @@ export function createAssignTaskHandler(client: FreedcampApiClient) {
     }
 
     return client.request(`/tasks/${input.task_id}/assign`, {
+      method: "POST",
+      body,
+    });
+  };
+}
+
+// Batch edit tasks
+
+export const batchUpdateTasksSchema = z.object({
+  batch_ids: z.array(z.number().int()).min(1).describe("Task IDs to update."),
+  body: z.record(z.unknown()).optional().describe("Fields to update for all tasks. Top-level extra fields are also sent."),
+}).catchall(z.unknown());
+
+export type BatchUpdateTasksInput = z.infer<typeof batchUpdateTasksSchema>;
+
+export function createBatchUpdateTasksHandler(client: FreedcampApiClient) {
+  return async (_ctx: unknown, rawInput: unknown): Promise<McpToolResult> => {
+    const input = rawInput as BatchUpdateTasksInput & Record<string, unknown>;
+    const body: Record<string, unknown> = { batch_ids: input.batch_ids };
+    for (const [key, value] of Object.entries(input)) {
+      if (key !== "body" && value !== undefined) {
+        body[key] = value;
+      }
+    }
+    Object.assign(body, input.body ?? {});
+
+    return client.request("/tasks/batch", {
       method: "POST",
       body,
     });

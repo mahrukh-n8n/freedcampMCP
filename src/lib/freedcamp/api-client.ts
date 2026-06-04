@@ -16,6 +16,8 @@ import { filterResponse } from "./utils/response-filter";
 import { logger } from "./utils/logger";
 import type { McpToolResult } from "../../modules/mcp/types";
 import { dataResult, commitResult, errorResult } from "../../modules/mcp/utils/serialize";
+import { readFile, stat } from "node:fs/promises";
+import { basename } from "node:path";
 
 export type FreedcampClientConfig = {
   apiKey: string;
@@ -41,6 +43,15 @@ export type RequestConfig = {
   pagination?: PaginationParams;
   sort?: SortParams;
   fields?: string | string[];
+  signal?: AbortSignal;
+};
+
+export type MultipartUploadConfig = {
+  filePath: string;
+  fileFieldName?: string;
+  filename?: string;
+  data?: Record<string, unknown>;
+  params?: Record<string, unknown>;
   signal?: AbortSignal;
 };
 
@@ -133,6 +144,58 @@ export class FreedcampApiClient {
     }
 
     return this.executeWithRetry<T>(url.toString(), fetchOptions, fields, isBodyMethod, signal);
+  }
+
+  /**
+   * Make an authenticated multipart/form-data request.
+   *
+   * Freedcamp's file upload Postman collection sends:
+   * - file: binary file field
+   * - data: JSON string with project_id/group_id/application_id/item_id
+   */
+  async requestMultipart<T = unknown>(
+    endpoint: string,
+    config: MultipartUploadConfig
+  ): Promise<McpToolResult> {
+    const auth = buildAuthParams(this.apiKey, this.apiSecret);
+    const relativeEndpoint = endpoint.replace(/^\/+/, "");
+    const url = new URL(relativeEndpoint, this.baseUrl);
+
+    url.searchParams.set("api_key", auth.api_key);
+    url.searchParams.set("timestamp", auth.timestamp);
+    url.searchParams.set("hash", auth.hash);
+
+    const queryParams = encodeAllParams(config.params);
+    queryParams.forEach((value, key) => {
+      url.searchParams.append(key, value);
+    });
+
+    try {
+      const info = await stat(config.filePath);
+      if (!info.isFile()) {
+        return errorResult(`Upload path is not a file: ${config.filePath}`, "VALIDATION_ERROR");
+      }
+
+      const bytes = await readFile(config.filePath);
+      const form = new FormData();
+      const fileBlob = new Blob([bytes], { type: "application/octet-stream" });
+      form.append(config.fileFieldName ?? "file", fileBlob, config.filename ?? basename(config.filePath));
+      form.append("data", JSON.stringify(config.data ?? {}));
+
+      const fetchOptions: RequestInit = {
+        method: "POST",
+        body: form,
+        signal: config.signal ?? AbortSignal.timeout(this.requestTimeoutMs),
+      };
+
+      return this.executeWithRetry<T>(url.toString(), fetchOptions, undefined, true, config.signal);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+        return errorResult(`Upload file not found: ${config.filePath}`, "NOT_FOUND");
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      return errorResult(`Upload error: ${msg}`, "INTERNAL_ERROR");
+    }
   }
 
   /**

@@ -27,6 +27,7 @@ import {
   updateTaskSchema, createUpdateTaskHandler,
   deleteTaskSchema, createDeleteTaskHandler,
   assignTaskSchema, createAssignTaskHandler,
+  batchUpdateTasksSchema, createBatchUpdateTasksHandler,
 } from "./tools/tasks";
 import { healthCheckSchema } from "./tools/health";
 import {
@@ -34,6 +35,7 @@ import {
   updateCommentSchema, createUpdateCommentHandler,
   deleteCommentSchema, createDeleteCommentHandler,
 } from "./tools/comments";
+import { registerCollectionEndpointTools } from "./tools/collection-endpoints";
 
 export function registerAllTools(client: FreedcampApiClient, apiKey: string, apiSecret: string, baseUrl?: string): void {
   // Health check
@@ -190,6 +192,15 @@ export function registerAllTools(client: FreedcampApiClient, apiKey: string, api
     handler: createAssignTaskHandler(client),
   });
 
+  toolRegistry.register({
+    name: "task.batch_update",
+    description: "Batch update tasks via /tasks/batch. Requires batch_ids and accepts any Freedcamp task update fields.",
+    inputSchema: batchUpdateTasksSchema,
+    requiredPageKey: "tasks",
+    accessLevel: "WRITE",
+    handler: createBatchUpdateTasksHandler(client),
+  });
+
   // Comments
   toolRegistry.register({
     name: "comment.add",
@@ -217,6 +228,8 @@ export function registerAllTools(client: FreedcampApiClient, apiKey: string, api
     accessLevel: "WRITE",
     handler: createDeleteCommentHandler(client),
   });
+
+  registerCollectionEndpointTools(client);
 
   toolRegistry.freeze();
 }
